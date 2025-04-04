@@ -1,8 +1,14 @@
 const admin = require('firebase-admin');
-const path = require('path');
-
 // Inicializar Firebase Admin
-const serviceAccount = require('./firebase-service-account.json');
+let serviceAccount;
+
+// En producción, usar variables de entorno
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+} else {
+  // En desarrollo, usar archivo local
+  serviceAccount = require('./firebase-service-account.json');
+}
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
