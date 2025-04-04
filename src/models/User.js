@@ -4,6 +4,10 @@ const bcrypt = require('bcryptjs');
 const userSchema = new mongoose.Schema({
   fullName: {
     type: String,
+    required: false, // Hacemos esto opcional ya que con Google/Firebase podemos recibir solo el nombre
+  },
+  name: {
+    type: String,
     required: true,
   },
   email: {
@@ -16,7 +20,7 @@ const userSchema = new mongoose.Schema({
   password: {
     type: String,
     required: function() {
-      return !this.googleId && !this.firebaseUid;
+      return !this.googleId && !this.firebaseId; // Password solo requerido para login normal
     },
   },
   googleId: {
@@ -24,7 +28,7 @@ const userSchema = new mongoose.Schema({
     sparse: true,
     unique: true
   },
-  firebaseUid: {
+  firebaseId: {
     type: String,
     sparse: true,
     unique: true
@@ -40,6 +44,10 @@ const userSchema = new mongoose.Schema({
   },
   resetPasswordToken: String,
   resetPasswordExpires: Date,
+  shop: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Shop'
+  },
   createdAt: {
     type: Date,
     default: Date.now,

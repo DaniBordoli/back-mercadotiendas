@@ -1,18 +1,18 @@
 const admin = require('../config/firebase');
 const User = require('../models/User');
 const { generateToken } = require('../utils/jwt');
-const { success, error } = require('../utils/response');
+const { successResponse, errorResponse } = require('../utils/response');
 
 exports.verifyFirebaseToken = async (req, res) => {
   try {
-    const { idToken } = req.body;
+    const { token } = req.body;
 
-    if (!idToken) {
-      return error(res, 'Token no proporcionado', 400);
+    if (!token) {
+      return errorResponse(res, 'Token no proporcionado', 400);
     }
 
     // Verificar el token con Firebase
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const decodedToken = await admin.auth().verifyIdToken(token);
     
     // Buscar usuario existente
     let user = await User.findOne({ email: decodedToken.email });
@@ -22,14 +22,14 @@ exports.verifyFirebaseToken = async (req, res) => {
       user = new User({
         email: decodedToken.email,
         name: decodedToken.name || decodedToken.email.split('@')[0],
-        firebaseUid: decodedToken.uid,
+        firebaseId: decodedToken.uid,
         emailVerified: decodedToken.email_verified,
         role: 'user'
       });
       await user.save();
     } else {
       // Actualizar información del usuario si es necesario
-      user.firebaseUid = decodedToken.uid;
+      user.firebaseId = decodedToken.uid;
       user.emailVerified = decodedToken.email_verified;
       if (decodedToken.name && user.name !== decodedToken.name) {
         user.name = decodedToken.name;
@@ -38,9 +38,14 @@ exports.verifyFirebaseToken = async (req, res) => {
     }
 
     // Generar token JWT
-    const token = generateToken(user);
+    const jwtToken = generateToken({
+      id: user._id,
+      email: user.email,
+      name: user.name,
+      role: user.role
+    });
 
-    return success(res, {
+    return successResponse(res, {
       message: 'Autenticación exitosa',
       user: {
         id: user._id,
@@ -48,11 +53,11 @@ exports.verifyFirebaseToken = async (req, res) => {
         name: user.name,
         role: user.role
       },
-      token
+      token: jwtToken
     });
 
   } catch (err) {
     console.error('Error en la autenticación de Firebase:', err);
-    return error(res, 'Error en la autenticación', 500);
+    return errorResponse(res, 'Error en la autenticación', 500);
   }
 };
