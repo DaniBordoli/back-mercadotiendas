@@ -10,10 +10,28 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
+    trim: true,
+    lowercase: true,
   },
   password: {
     type: String,
-    required: true,
+    required: function() {
+      return !this.googleId && !this.firebaseUid;
+    },
+  },
+  googleId: {
+    type: String,
+    sparse: true,
+    unique: true
+  },
+  firebaseUid: {
+    type: String,
+    sparse: true,
+    unique: true
+  },
+  emailVerified: {
+    type: Boolean,
+    default: false
   },
   role: {
     type: String,
