@@ -2,10 +2,11 @@ const admin = require('firebase-admin');
 const User = require('../models/User');
 const { generateToken } = require('../utils/jwt');
 const { successResponse, errorResponse } = require('../utils/response');
+const { config } = require('../config');
 
 // Inicializar Firebase Admin si no está inicializado
 if (!admin.apps.length) {
-  const serviceAccount = require('../config/firebase-service-account.json');
+  const serviceAccount = require(`../config/firebase-service-account${config.isDevelopment ? '-dev' : '-prod'}.json`);
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
   });
@@ -31,7 +32,7 @@ exports.verifyGoogleToken = async (req, res) => {
       return errorResponse(res, 'Token no proporcionado', 400);
     }
 
-    console.log('Google Client ID:', process.env.GOOGLE_CLIENT_ID);
+    console.log('Google Client ID:', config.googleClientId);
     // Verificar el token de Firebase
     const decodedToken = await admin.auth().verifyIdToken(token);
     console.log('Token verified successfully');
