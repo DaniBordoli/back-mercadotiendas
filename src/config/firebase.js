@@ -6,8 +6,13 @@ let serviceAccount;
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 } else {
-  // En desarrollo, usar archivo local
-  serviceAccount = require('./firebase-service-account.json');
+  // En desarrollo, usar archivo local según el ambiente
+  const env = process.env.NODE_ENV || 'development';
+  const serviceAccountFile = env === 'production' 
+    ? './firebase-service-account-prod.json'
+    : './firebase-service-account-dev.json';
+  
+  serviceAccount = require(serviceAccountFile);
 }
 
 admin.initializeApp({
