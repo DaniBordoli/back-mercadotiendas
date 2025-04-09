@@ -12,7 +12,7 @@ const transporter = nodemailer.createTransport({
 });
 
 const sendResetPasswordEmail = async (email, token) => {
-  const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${token}`;
+  const resetUrl = `${process.env.FRONTEND_URL}/password-restore?token=${token}`;
 
   const mailOptions = {
     from: `"MercadoTiendas" <${config.emailService.user}>`,
