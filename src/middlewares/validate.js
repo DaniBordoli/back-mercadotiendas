@@ -95,6 +95,19 @@ const validationRules = {
     body('password')
       .trim()
       .notEmpty().withMessage('La contraseña es requerida')
+  ],
+  
+  activateAccount: [
+    body('email')
+      .trim()
+      .notEmpty().withMessage('El email es requerido')
+      .isEmail().withMessage('Email inválido')
+      .normalizeEmail(),
+    body('activationCode')
+      .trim()
+      .notEmpty().withMessage('El código de activación es requerido')
+      .isLength({ min: 6, max: 6 }).withMessage('El código debe tener 6 dígitos')
+      .isNumeric().withMessage('El código debe contener solo números')
   ]
 };
 

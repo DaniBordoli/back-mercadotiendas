@@ -2,23 +2,27 @@ const User = require('../models/User');
 const { generateToken } = require('../utils/jwt');
 const { successResponse, errorResponse } = require('../utils/response');
 const crypto = require('crypto');
-const { sendResetPasswordEmail } = require('../services/email.service');
+const { sendResetPasswordEmail, sendActivationCodeEmail } = require('../services/email.service');
 
 const register = async (req, res) => {
   try {
     const { fullName, email, password } = req.body;
 
-    // Verificar si el usuario ya existe
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return errorResponse(res, 'El email ya está registrado', 400);
     }
 
+    const activationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const activationCodeExpires = new Date(Date.now() + 3600000);
+
     // Crear nuevo usuario
     const user = new User({
       fullName,
       email,
-      password
+      password,
+      activationCode,
+      activationCodeExpires
     });
 
     // Encriptar contraseña
@@ -27,11 +31,21 @@ const register = async (req, res) => {
 
     // Generar token
     const token = generateToken({ id: user._id });
+    
+    // Enviar email con código de activación
+    try {
+      await sendActivationCodeEmail(email, activationCode);
+      console.log('Correo de activación enviado durante registro:', email);
+    } catch (emailError) {
+      console.error('Error al enviar email de activación durante registro:', emailError);
+      // No interrumpimos el flujo si falla el envío del email
+    }
 
-    // Enviar respuesta sin la contraseña
     const userResponse = { ...user.toJSON() };
     delete userResponse.password;
-
+    delete userResponse.activationCode;
+    delete userResponse.activationCodeExpires;
+    
     return successResponse(res, { user: userResponse, token }, 'Usuario registrado exitosamente', 201);
   } catch (error) {
     return errorResponse(res, 'Error al registrar usuario', 500, error.message);
@@ -137,10 +151,71 @@ const verifyResetToken = async (req, res) => {
   }
 };
 
+const activateAccount = async (req, res) => {
+  try {
+    const { email, activationCode } = req.body;
+
+    const user = await User.findOne({
+      email,
+      activationCode,
+      activationCodeExpires: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return errorResponse(res, 'Código de activación inválido o expirado', 400);
+    }
+
+    user.isActivated = true;
+    user.activationCode = undefined;
+    user.activationCodeExpires = undefined;
+    await user.save();
+
+    const token = generateToken({ id: user._id });
+
+    // Enviar respuesta sin la contraseña
+    const userResponse = { ...user.toJSON() };
+    delete userResponse.password;
+    
+    return successResponse(res, { user: userResponse, token }, 'Cuenta activada exitosamente');
+  } catch (error) {
+    return errorResponse(res, 'Error al activar la cuenta', 500, error.message);
+  }
+};
+
+const resendActivationCode = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+        return successResponse(res, null, 'Si el email existe, recibirás un nuevo código de activación');
+    }
+
+    if (user.isActivated) {
+      return errorResponse(res, 'Esta cuenta ya está activada', 400);
+    }
+
+    const activationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    user.activationCode = activationCode;
+    user.activationCodeExpires = new Date(Date.now() + 3600000);
+    await user.save();
+
+    // Enviar email con código de activación
+    await sendActivationCodeEmail(email, activationCode);
+
+    return successResponse(res, null, 'Nuevo código de activación enviado');
+  } catch (error) {
+    return errorResponse(res, 'Error al reenviar el código de activación', 500, error.message);
+  }
+};
+
 module.exports = {
   register,
   login,
   forgotPassword,
   resetPassword,
-  verifyResetToken
+  verifyResetToken,
+  activateAccount,
+  resendActivationCode
 };

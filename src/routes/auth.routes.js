@@ -9,6 +9,8 @@ const {
   forgotPassword,
   resetPassword,
   verifyResetToken,
+  activateAccount,
+  resendActivationCode
 } = require('../controllers/auth.controller');
 
 /**
@@ -45,5 +47,19 @@ router.post('/reset-password/:token', validateRequest('resetPassword'), resetPas
  * @access Public
  */
 router.get('/verify-reset-token/:token', verifyResetToken);
+
+/**
+ * @route POST /api/auth/activate-account
+ * @desc Activar cuenta de usuario con código
+ * @access Public
+ */
+router.post('/activate-account', validateRequest('activateAccount'), activateAccount);
+
+/**
+ * @route POST /api/auth/resend-activation-code
+ * @desc Reenviar código de activación
+ * @access Public
+ */
+router.post('/resend-activation-code', validateRequest('email'), resendActivationCode);
 
 module.exports = router;
