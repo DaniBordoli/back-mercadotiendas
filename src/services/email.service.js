@@ -12,10 +12,8 @@ const transporter = nodemailer.createTransport({
 });
 
 const sendResetPasswordEmail = async (email, token) => {
-  // Construir la URL completa para el reseteo de contraseña
   const resetUrl = `${process.env.FRONTEND_URL}/password-restore?token=${token}`;
 
-  // Opciones del correo con HTML plano para evitar problemas de formato
   const mailOptions = {
     from: `"MercadoTiendas" <${config.emailService.user}>`,
     to: email,
@@ -47,6 +45,37 @@ const sendResetPasswordEmail = async (email, token) => {
   }
 };
 
+const sendActivationCodeEmail = async (email, activationCode) => {
+  const mailOptions = {
+    from: `"MercadoTiendas" <${config.emailService.user}>`,
+    to: email,
+    subject: 'Activación de Cuenta',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
+        <h1 style="color: #333; text-align: center;">Activación de Cuenta</h1>
+        <p>Gracias por registrarte en MercadoTiendas.</p>
+        <p>Para activar tu cuenta, utiliza el siguiente código de activación:</p>
+        <div style="text-align: center; margin: 20px 0;">
+          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; display: inline-block; font-size: 24px; font-weight: bold; letter-spacing: 5px;">${activationCode}</div>
+        </div>
+        <p>Este código expirará en 1 hora.</p>
+        <p>Si no has creado una cuenta en MercadoTiendas, puedes ignorar este correo.</p>
+        <div style="text-align: center; margin-top: 20px; color: #888; font-size: 12px;">
+          <p>MercadoTiendas &copy; 2025</p>
+        </div>
+      </div>
+    `
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+  } catch (error) {
+    console.error('Error sending activation email:', error);
+    throw new Error('Error al enviar el email de activación');
+  }
+};
+
 module.exports = {
-  sendResetPasswordEmail
+  sendResetPasswordEmail,
+  sendActivationCodeEmail
 };

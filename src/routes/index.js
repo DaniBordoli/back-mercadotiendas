@@ -3,13 +3,11 @@ const authRoutes = require('./auth.routes');
 const userRoutes = require('./user.routes');
 const testRoutes = require('./test.routes');
 const firebaseAuthRoutes = require('./firebase-auth.routes');
-const googleAuthRoutes = require('./google-auth.routes');
 const shopRoutes = require('./shop.routes');
 
 // Rutas de autenticación (/api/auth/*)
 router.use('/auth', authRoutes);
 router.use('/auth/firebase', firebaseAuthRoutes);
-router.use('/auth/google', googleAuthRoutes);
 
 // Rutas de usuario (/api/users/*)
 router.use('/users', userRoutes);

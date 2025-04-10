@@ -33,9 +33,15 @@ const userSchema = new mongoose.Schema({
     sparse: true,
     unique: true
   },
-  emailVerified: {
+  isActivated: {
     type: Boolean,
     default: false
+  },
+  activationCode: {
+    type: String
+  },
+  activationCodeExpires: {
+    type: Date
   },
   role: {
     type: String,
