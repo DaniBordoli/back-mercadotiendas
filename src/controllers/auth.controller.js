@@ -4,82 +4,9 @@ const { successResponse, errorResponse } = require('../utils/response');
 const crypto = require('crypto');
 const { sendResetPasswordEmail, sendActivationCodeEmail } = require('../services/email.service');
 
-const register = async (req, res) => {
-  try {
-    const { fullName, email, password } = req.body;
 
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return errorResponse(res, 'El email ya está registrado', 400);
-    }
 
-    const activationCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const activationCodeExpires = new Date(Date.now() + 3600000);
 
-    // Crear nuevo usuario
-    const user = new User({
-      fullName,
-      email,
-      password,
-      activationCode,
-      activationCodeExpires
-    });
-
-    // Encriptar contraseña
-    user.password = await user.encryptPassword(password);
-    await user.save();
-
-    // Generar token
-    const token = generateToken({ id: user._id });
-    
-    // Enviar email con código de activación
-    try {
-      await sendActivationCodeEmail(email, activationCode);
-      console.log('Correo de activación enviado durante registro:', email);
-    } catch (emailError) {
-      console.error('Error al enviar email de activación durante registro:', emailError);
-      // No interrumpimos el flujo si falla el envío del email
-    }
-
-    const userResponse = { ...user.toJSON() };
-    delete userResponse.password;
-    delete userResponse.activationCode;
-    delete userResponse.activationCodeExpires;
-    
-    return successResponse(res, { user: userResponse, token }, 'Usuario registrado exitosamente', 201);
-  } catch (error) {
-    return errorResponse(res, 'Error al registrar usuario', 500, error.message);
-  }
-};
-
-const login = async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    // Buscar usuario
-    const user = await User.findOne({ email });
-    if (!user) {
-      return errorResponse(res, 'Credenciales inválidas', 401);
-    }
-
-    // Verificar contraseña
-    const isValidPassword = await user.matchPassword(password);
-    if (!isValidPassword) {
-      return errorResponse(res, 'Credenciales inválidas', 401);
-    }
-
-    // Generar token
-    const token = generateToken({ id: user._id });
-
-    // Enviar respuesta sin la contraseña
-    const userResponse = { ...user.toJSON() };
-    delete userResponse.password;
-
-    return successResponse(res, { user: userResponse, token }, 'Login exitoso');
-  } catch (error) {
-    return errorResponse(res, 'Error al iniciar sesión', 500, error.message);
-  }
-};
 
 const forgotPassword = async (req, res) => {
   try {
@@ -211,8 +138,6 @@ const resendActivationCode = async (req, res) => {
 };
 
 module.exports = {
-  register,
-  login,
   forgotPassword,
   resetPassword,
   verifyResetToken,

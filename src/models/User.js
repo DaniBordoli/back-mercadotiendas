@@ -43,6 +43,22 @@ const userSchema = new mongoose.Schema({
   activationCodeExpires: {
     type: Date
   },
+  birthDate: {
+    type: Date,
+    required: false
+  },
+  city: {
+    type: String,
+    required: false
+  },
+  province: {
+    type: String,
+    required: false
+  },
+  country: {
+    type: String,
+    required: false
+  },
   role: {
     type: String,
     enum: ['admin', 'user'],
