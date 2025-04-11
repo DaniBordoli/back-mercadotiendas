@@ -6,7 +6,7 @@ const { sendActivationCodeEmail } = require('../services/email.service');
 
 exports.verifyFirebaseToken = async (req, res) => {
   try {
-    const { token } = req.body;
+    const { token, userData: customUserData } = req.body;
 
     if (!token) {
       return errorResponse(res, 'Token no proporcionado', 400);
@@ -20,7 +20,12 @@ exports.verifyFirebaseToken = async (req, res) => {
       // Creamos un usuario nuevo
       const userData = {
         email: decodedToken.email,
-        name: decodedToken.name || decodedToken.email.split('@')[0],
+        name: decodedToken.name || customUserData?.fullName || decodedToken.email.split('@')[0],
+        fullName: customUserData?.fullName,
+        birthDate: customUserData?.birthDate ? new Date(customUserData.birthDate) : undefined,
+        city: customUserData?.city,
+        province: customUserData?.province,
+        country: customUserData?.country,
         firebaseId: decodedToken.uid,
         isActivated: decodedToken.email_verified, // Para Google, usamos la verificación de Firebase
         role: 'user'
@@ -68,7 +73,32 @@ exports.verifyFirebaseToken = async (req, res) => {
         }
       }
       
-      if (decodedToken.name && user.name !== decodedToken.name) {
+      // Actualizar campos del usuario si se proporcionan en customUserData
+      if (customUserData) {
+        if (customUserData.fullName) {
+          user.fullName = customUserData.fullName;
+          // Actualizar también el nombre si no está establecido o es el email por defecto
+          if (!user.name || user.name === user.email.split('@')[0]) {
+            user.name = customUserData.fullName;
+          }
+        }
+        
+        if (customUserData.birthDate) {
+          user.birthDate = new Date(customUserData.birthDate);
+        }
+        
+        if (customUserData.city) {
+          user.city = customUserData.city;
+        }
+        
+        if (customUserData.province) {
+          user.province = customUserData.province;
+        }
+        
+        if (customUserData.country) {
+          user.country = customUserData.country;
+        }
+      } else if (decodedToken.name && user.name !== decodedToken.name) {
         user.name = decodedToken.name;
       }
       await user.save();
@@ -85,6 +115,11 @@ exports.verifyFirebaseToken = async (req, res) => {
       id: user._id,
       email: user.email,
       name: user.name,
+      fullName: user.fullName,
+      birthDate: user.birthDate,
+      city: user.city,
+      province: user.province,
+      country: user.country,
       role: user.role,
       isActivated: user.isActivated,
       shop: user.shop
