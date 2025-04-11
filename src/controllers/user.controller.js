@@ -3,7 +3,8 @@ const { successResponse, errorResponse } = require('../utils/response');
 
 const getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('-password');
+    // Seleccionamos los campos específicos que queremos devolver
+    const user = await User.findById(req.user.id).select('name email birthDate city province country');
     if (!user) {
       return errorResponse(res, 'Usuario no encontrado', 404);
     }
@@ -16,7 +17,7 @@ const getProfile = async (req, res) => {
 
 const updateProfile = async (req, res) => {
   try {
-    const { fullName, email } = req.body;
+    const { name, email, birthDate, city, province, country } = req.body;
 
     // Verificar si el nuevo email ya está en uso
     if (email) {
@@ -32,8 +33,12 @@ const updateProfile = async (req, res) => {
     }
 
     // Actualizar campos
-    if (fullName) user.fullName = fullName;
+    if (name) user.name = name;
     if (email) user.email = email;
+    if (birthDate) user.birthDate = birthDate;
+    if (city) user.city = city;
+    if (province) user.province = province;
+    if (country) user.country = country;
 
     await user.save();
 
