@@ -7,30 +7,38 @@ exports.createShop = async (req, res) => {
     const shopData = req.body;
     console.log('Received shop data:', shopData);
     console.log('User from token:', req.user);
-    const userId = req.user.id; // Este viene del middleware de autenticación
+    const userId = req.user.id; 
 
-    // Verificar que el usuario existe
+    
     const user = await User.findById(userId);
     if (!user) {
       return errorResponse(res, 'Usuario no encontrado', 404);
     }
 
-    // Mapear los datos al formato esperado por el modelo
+    
+    if (user.shop) {
+      return errorResponse(res, 'El usuario ya es propietario de una tienda', 400);
+    }
+
+    
     const shopModelData = {
       name: shopData.shopName,
       description: shopData.description,
       category: shopData.category,
       address: shopData.address,
+      brandName: shopData.brandName,
+      contactEmail: shopData.contactEmail,
+      shopPhone: shopData.shopPhone,
       owner: userId
     };
 
-    // Crear la tienda
+   
     const newShop = new Shop(shopModelData);
 
-    // Guardar la tienda
+    
     await newShop.save();
 
-    // Actualizar el usuario con la referencia a la tienda
+
     user.shop = newShop._id;
     await user.save();
 

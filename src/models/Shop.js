@@ -15,7 +15,19 @@ const shopSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
-  logo: {
+  brandName: {
+    type: String
+  },
+  address: {
+    type: String,
+    required: true,
+    unique: true,
+  },
+  contactEmail: {
+    type: String,
+    required: true
+  },
+  shopPhone: {
     type: String
   },
   active: {
