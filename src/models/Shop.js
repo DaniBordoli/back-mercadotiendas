@@ -30,6 +30,9 @@ const shopSchema = new mongoose.Schema({
   shopPhone: {
     type: String
   },
+  imageUrl: {
+    type: String
+  },
   active: {
     type: Boolean,
     default: true

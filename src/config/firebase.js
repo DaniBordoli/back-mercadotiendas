@@ -15,6 +15,7 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   serviceAccount = require(serviceAccountFile);
 }
 
+// Inicializar Firebase Admin
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });

@@ -4,7 +4,9 @@ const { successResponse, errorResponse } = require('../utils/response');
 const getProfile = async (req, res) => {
   try {
     // Seleccionamos los campos específicos que queremos devolver
-    const user = await User.findById(req.user.id).select('name email birthDate city province country');
+    const user = await User.findById(req.user.id)
+      .select('name email birthDate city province country shop')
+      .populate('shop');
     if (!user) {
       return errorResponse(res, 'Usuario no encontrado', 404);
     }

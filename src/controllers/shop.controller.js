@@ -1,6 +1,22 @@
 const Shop = require('../models/Shop');
 const User = require('../models/User');
 const { successResponse, errorResponse } = require('../utils/response');
+const cloudinaryService = require('../services/cloudinary.service');
+const multer = require('multer');
+
+// Configurar multer para manejar la carga de archivos en memoria
+const upload = multer({
+    limits: {
+        fileSize: 10 * 1024 * 1024 // 10MB límite
+    },
+    fileFilter: (req, file, cb) => {
+        // Verificar que sea una imagen
+        if (!file.mimetype.startsWith('image/')) {
+            return cb(new Error('Solo se permiten archivos de imagen'));
+        }
+        cb(null, true);
+    }
+}).single('image'); // 'image' es el nombre del campo en el formulario
 
 exports.createShop = async (req, res) => {
   try {
@@ -70,7 +86,15 @@ exports.getShop = async (req, res) => {
 };
 
 exports.updateShop = async (req, res) => {
-  try {
+    // Manejar la carga del archivo
+    upload(req, res, async (err) => {
+        if (err instanceof multer.MulterError) {
+            return errorResponse(res, 'Error al subir el archivo: ' + err.message, 400);
+        } else if (err) {
+            return errorResponse(res, 'Error al procesar el archivo: ' + err.message, 400);
+        }
+
+        try {
     const { id } = req.params;
     const updates = req.body;
     const userId = req.user.id;
@@ -85,18 +109,37 @@ exports.updateShop = async (req, res) => {
       return errorResponse(res, 'No autorizado', 403);
     }
 
-    // Actualizar la tienda
-    Object.assign(shop, updates);
-    await shop.save();
+            // Si hay una imagen nueva, subirla a Cloudinary
+            if (req.file) {
+                try {
+                    // Si ya existe una imagen, eliminarla
+                    if (shop.imageUrl) {
+                        await cloudinaryService.deleteImage(shop.imageUrl);
+                    }
+                    
+                    // Subir la nueva imagen
+                    const imageUrl = await cloudinaryService.uploadImage(req.file.buffer);
+                    updates.imageUrl = imageUrl;
+                } catch (uploadError) {
+                    console.error('Error al procesar la imagen:', uploadError);
+                    return errorResponse(res, 'Error al procesar la imagen', 500);
+                }
+            }
 
-    return successResponse(res, {
-      message: 'Tienda actualizada exitosamente',
-      shop
+            // Actualizar la tienda
+            Object.assign(shop, updates);
+            await shop.save();
+
+            return successResponse(res, {
+                message: 'Tienda actualizada exitosamente',
+                shop
+            });
+        } catch (err) {
+            console.error('Error al actualizar tienda:', err);
+            return errorResponse(res, 'Error al actualizar tienda', 500);
+        }
     });
-  } catch (err) {
-    console.error('Error al actualizar tienda:', err);
-    return errorResponse(res, 'Error al actualizar tienda', 500);
-  }
+
 };
 
 exports.deleteShop = async (req, res) => {
@@ -112,6 +155,16 @@ exports.deleteShop = async (req, res) => {
     // Verificar que el usuario es el dueño de la tienda
     if (shop.owner.toString() !== userId) {
       return errorResponse(res, 'No autorizado', 403);
+    }
+
+    // Si la tienda tiene una imagen, eliminarla de Cloudinary
+    if (shop.imageUrl) {
+        try {
+            await cloudinaryService.deleteImage(shop.imageUrl);
+        } catch (error) {
+            console.error('Error al eliminar imagen:', error);
+            // Continuamos con la eliminación de la tienda aunque falle la eliminación de la imagen
+        }
     }
 
     // Eliminar la tienda
