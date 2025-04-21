@@ -13,12 +13,12 @@ const validationRules = {
       .notEmpty().withMessage('El email es requerido')
       .isEmail().withMessage('Email inválido')
       .normalizeEmail(),
-    body('password')
+      body('password')
       .trim()
       .notEmpty().withMessage('La contraseña es requerida')
-      .isLength({ min: 6 }).withMessage('La contraseña debe tener al menos 6 caracteres')
-      .matches(/^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{6,}$/)
-      .withMessage('La contraseña debe contener al menos una letra y un número'),
+      .isLength({ min: 8 }).withMessage('La contraseña debe tener al menos 8 caracteres')
+      .matches(/^(?=.*[A-Z])(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>/?]).{8,}$/)
+      .withMessage('La contraseña debe contener al menos una mayúscula y un carácter especial'),
     body('passwordConfirm')
       .trim()
       .notEmpty().withMessage('La confirmación de contraseña es requerida')
@@ -57,12 +57,12 @@ const validationRules = {
     body('currentPassword')
       .trim()
       .notEmpty().withMessage('La contraseña actual es requerida'),
-    body('newPassword')
+      body('newPassword')
       .trim()
       .notEmpty().withMessage('La nueva contraseña es requerida')
-      .isLength({ min: 6 }).withMessage('La contraseña debe tener al menos 6 caracteres')
-      .matches(/^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{6,}$/)
-      .withMessage('La contraseña debe contener al menos una letra y un número')
+      .isLength({ min: 8 }).withMessage('La contraseña debe tener al menos 8 caracteres')
+      .matches(/^(?=.*[A-Z])(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>/?]).{8,}$/)
+      .withMessage('La contraseña debe contener al menos una mayúscula y un carácter especial')
       .custom((value, { req }) => {
         if (value === req.body.currentPassword) {
           throw new Error('La nueva contraseña debe ser diferente a la actual');
@@ -75,12 +75,12 @@ const validationRules = {
     param('token')
       .trim()
       .notEmpty().withMessage('Token inválido'),
-    body('password')
+      body('password')
       .trim()
       .notEmpty().withMessage('La contraseña es requerida')
-      .isLength({ min: 6 }).withMessage('La contraseña debe tener al menos 6 caracteres')
-      .matches(/^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{6,}$/)
-      .withMessage('La contraseña debe contener al menos una letra y un número')
+      .isLength({ min: 8 }).withMessage('La contraseña debe tener al menos 8 caracteres')
+      .matches(/^(?=.*[A-Z])(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>/?]).{8,}$/)
+      .withMessage('La contraseña debe contener al menos una mayúscula y un carácter especial')
   ],
 
   email: [
