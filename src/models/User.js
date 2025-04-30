@@ -74,6 +74,10 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+  avatar: {
+    type: String,
+    default: null
+  },
 });
 
 // Método para encriptar contraseña

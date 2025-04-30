@@ -1,11 +1,27 @@
 const User = require('../models/User');
 const { successResponse, errorResponse } = require('../utils/response');
+const cloudinaryService = require('../services/cloudinary.service');
+const multer = require('multer');
+
+// Configurar multer para manejar la carga de archivos en memoria
+const upload = multer({
+    limits: {
+        fileSize: 10 * 1024 * 1024 // 10MB límite
+    },
+    fileFilter: (req, file, cb) => {
+        // Verificar que sea una imagen
+        if (!file.mimetype.startsWith('image/')) {
+            return cb(new Error('Solo se permiten archivos de imagen'));
+        }
+        cb(null, true);
+    }
+}).single('avatar'); // 'avatar' es el nombre del campo en el formulario
 
 const getProfile = async (req, res) => {
   try {
     // Seleccionamos los campos específicos que queremos devolver
     const user = await User.findById(req.user.id)
-      .select('name email birthDate city province country shop')
+      .select('name email birthDate city province country shop avatar')
       .populate('shop');
     if (!user) {
       return errorResponse(res, 'Usuario no encontrado', 404);
@@ -15,6 +31,48 @@ const getProfile = async (req, res) => {
   } catch (error) {
     return errorResponse(res, 'Error al obtener el perfil', 500, error.message);
   }
+};
+
+const updateAvatar = async (req, res) => {
+    // Manejar la carga del archivo
+    upload(req, res, async (err) => {
+        if (err instanceof multer.MulterError) {
+            return errorResponse(res, 'Error al subir el archivo: ' + err.message, 400);
+        } else if (err) {
+            return errorResponse(res, 'Error al procesar el archivo: ' + err.message, 400);
+        }
+
+        try {
+
+            if (!req.file) {
+                return errorResponse(res, 'No se subió ningún archivo', 400);
+            }
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return errorResponse(res, 'Usuario no encontrado', 404);
+    }
+
+            // Si el usuario ya tenía un avatar, eliminarlo de Cloudinary
+            if (user.avatar) {
+                try {
+                    await cloudinaryService.deleteImage(user.avatar);
+                } catch (error) {
+                }
+            }
+
+            // Subir el nuevo avatar a Cloudinary
+            const avatarUrl = await cloudinaryService.uploadImage(req.file.buffer, 'avatars');
+            
+            // Actualizar la URL del avatar
+            user.avatar = avatarUrl;
+            await user.save();
+
+            return successResponse(res, { avatar: user.avatar }, 'Avatar actualizado exitosamente');
+        } catch (error) {
+            return errorResponse(res, 'Error al actualizar el avatar', 500, error.message);
+        }
+    });
 };
 
 const updateProfile = async (req, res) => {
@@ -106,5 +164,6 @@ module.exports = {
   getProfile,
   updateProfile,
   updatePassword,
-  deleteAccount
+  deleteAccount,
+  updateAvatar
 };

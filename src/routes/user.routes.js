@@ -1,13 +1,14 @@
-const router = require('express').Router();
-const { validateRequest } = require('../middlewares/validate');
+const express = require('express');
+const router = express.Router();
 const { verifyToken } = require('../middlewares/auth');
+const { validateRequest } = require('../middlewares/validate');
 
-// Importaremos estos controladores después
 const {
   getProfile,
   updateProfile,
   updatePassword,
-  deleteAccount
+  deleteAccount,
+  updateAvatar
 } = require('../controllers/user.controller');
 
 /**
@@ -48,6 +49,16 @@ router.delete('/account',
   verifyToken,
   validateRequest('deleteAccount'),
   deleteAccount
+);
+
+/**
+ * @route PUT /api/users/avatar
+ * @desc Actualizar avatar del usuario
+ * @access Private
+ */
+router.put('/avatar',
+  verifyToken,
+  updateAvatar
 );
 
 module.exports = router;
