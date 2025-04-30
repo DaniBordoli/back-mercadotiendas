@@ -14,7 +14,7 @@ exports.verifyFirebaseToken = async (req, res) => {
 
     const decodedToken = await admin.auth().verifyIdToken(token);
     
-    let user = await User.findOne({ email: decodedToken.email });
+    let user = await User.findOne({ $or: [{ email: decodedToken.email }, { firebaseId: decodedToken.uid }] });
 
     if (!user) {
       // Creamos un usuario nuevo
