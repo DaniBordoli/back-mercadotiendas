@@ -30,6 +30,30 @@ const shopSchema = new mongoose.Schema({
   shopPhone: {
     type: String
   },
+  taxAdress: {
+    type: String,
+    Optional: true
+  },
+  preferredCurrency: {
+    type: String,
+    Optional: true
+  },
+  languageMain: {
+    type: String,
+    Optional: true
+  },
+  province: {
+    type: String,
+    Optional: true
+  },
+  city: {
+    type: String,
+    Optional: true
+  },
+  country: {
+    type: String,
+    Optional: true
+  },
   imageUrl: {
     type: String
   },
