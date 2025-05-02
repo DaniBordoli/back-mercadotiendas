@@ -21,51 +21,72 @@ const upload = multer({
 exports.createShop = async (req, res) => {
   try {
     const shopData = req.body;
-    console.log('Received shop data:', shopData);
+    console.log('Received shop data for creation:', shopData);
     console.log('User from token:', req.user);
-    const userId = req.user.id; 
 
-    
+    const userId = req.user.id;
     const user = await User.findById(userId);
     if (!user) {
       return errorResponse(res, 'Usuario no encontrado', 404);
     }
-
-    
     if (user.shop) {
       return errorResponse(res, 'El usuario ya es propietario de una tienda', 400);
     }
 
-    
+    // --- Subdomain Validation --- 
+    if (!shopData.subdomain || !/^[a-z0-9-]{3,30}$/.test(shopData.subdomain)) {
+        return errorResponse(res, 'Subdominio inválido o faltante (3-30 caracteres, solo minúsculas, números, guiones).', 400);
+    }
+    // Use 'address' field to store subdomain, assuming that's the unique identifier in the model
+    // If you have a dedicated 'subdomain' field in the model, use that instead.
+    const existingShop = await Shop.findOne({ address: shopData.subdomain });
+    if (existingShop) {
+       return errorResponse(res, 'El subdominio ya está en uso', 400);
+    }
+    // --- End Validation ---
+
+    // Ensure required fields are present (add more as needed)
+    if (!shopData.shopName || !shopData.brandName || !shopData.contactEmail || !shopData.shopPhone ) {
+        return errorResponse(res, 'Faltan campos requeridos para crear la tienda.', 400);
+    }
+
     const shopModelData = {
       name: shopData.shopName,
-      description: shopData.description,
-      category: shopData.category,
-      address: shopData.address,
+      description: shopData.description || '', // Provide default if optional
+      category: shopData.category || 'other', // Provide default if optional
+      address: shopData.subdomain, // Storing subdomain in address field
       brandName: shopData.brandName,
       contactEmail: shopData.contactEmail,
       shopPhone: shopData.shopPhone,
-      owner: userId
+      owner: userId,
+      // active: true, // Default is true in model
+      // imageUrl: null, // Default is null
+      // templateConfig: shopData.templateConfig, // Add if saving template details
     };
 
-   
+    console.log('Attempting to save shop with data:', shopModelData);
     const newShop = new Shop(shopModelData);
-
-    
     await newShop.save();
 
+    console.log('Shop saved successfully:', newShop._id);
 
     user.shop = newShop._id;
     await user.save();
+    console.log('User document updated with shop ID.');
 
+    // Return the created shop data along with the success message
     return successResponse(res, {
       message: 'Tienda creada exitosamente',
-      shop: newShop
+      shop: newShop.toObject() // Send plain object
     });
 
   } catch (err) {
     console.error('Error al crear tienda:', err);
-    return errorResponse(res, 'Error al crear tienda', 500);
+    // Handle potential duplicate key errors on other fields if necessary
+    if (err.code === 11000) {
+         return errorResponse(res, 'Error: Hubo un conflicto al guardar la tienda (posible duplicado).', 409);
+    }
+    return errorResponse(res, 'Error interno al crear tienda', 500);
   }
 };
 

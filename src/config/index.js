@@ -19,7 +19,9 @@ const config = {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
   },
+  openaiApiKey: process.env.OPENAI_API_KEY,
   isDevelopment
 };
 
 module.exports = { config };
+
