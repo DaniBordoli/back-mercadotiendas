@@ -16,11 +16,12 @@ const shopSchema = new mongoose.Schema({
     required: true
   },
   brandName: {
-    type: String
+    type: String,
+    optional: true
   },
   address: {
     type: String,
-    required: true,
+    optional: true,
     unique: true,
   },
   contactEmail: {
