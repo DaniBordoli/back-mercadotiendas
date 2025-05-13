@@ -9,7 +9,7 @@ const openai = new OpenAI({
 const TEMPLATE_STRUCTURE = `
 {
   "navbarLinks": [{ "label": "string", "href": "string" }],
-  "title": "string", // Store Title shown in Navbar
+  "title": "string",
   "fontType": "string (e.g., 'Arial', 'Verdana', 'Times New Roman', 'Courier New')",
   "placeholderHeroImage": "string (URL)",
   "placeholderCardImage": "string (URL)",
@@ -25,12 +25,18 @@ const TEMPLATE_STRUCTURE = `
   "buttonTextColor": "string (hex color)",
   "buttonBorderColor": "string (hex color)",
   "buttonText": "string",
-  "storeName": "string", // Primary store name
+  "button2Text": "string",
+  "button2BackgroundColor": "string (hex color)",
+  "button2TextColor": "string (hex color)",
+  "heroBackgroundColor": "string (hex color)",
+  "featuredProductsTitle": "string",
+  "categorySectionTitle": "string",
+  "storeName": "string",
   "storeDescription": "string",
   "storeSlogan": "string",
-  "primaryColor": "string (hex color)", // Main brand color
-  "secondaryColor": "string (hex color)", // Accent color
-  "footerElements": [{ "title": "string", "content": "string" }] // Simplified footer content
+  "primaryColor": "string (hex color)",
+  "secondaryColor": "string (hex color)",
+  "footerElements": [{ "title": "string", "content": "string" }]
 }
 `;
 

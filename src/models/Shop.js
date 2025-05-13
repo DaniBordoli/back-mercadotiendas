@@ -15,7 +15,7 @@ const shopSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
-  brandName: {
+  layoutDesign: {
     type: String,
     optional: true
   },

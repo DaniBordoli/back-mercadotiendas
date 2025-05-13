@@ -46,7 +46,7 @@ exports.createShop = async (req, res) => {
     // --- End Validation ---
 
     // Ensure required fields are present (add more as needed)
-    if (!shopData.shopName || !shopData.brandName || !shopData.contactEmail || !shopData.shopPhone ) {
+    if (!shopData.shopName || !shopData.layoutDesign || !shopData.contactEmail || !shopData.shopPhone ) {
         return errorResponse(res, 'Faltan campos requeridos para crear la tienda.', 400);
     }
 
@@ -55,7 +55,7 @@ exports.createShop = async (req, res) => {
       description: shopData.description || '', // Provide default if optional
       category: shopData.category || 'other', // Provide default if optional
       address: shopData.subdomain, // Storing subdomain in address field
-      brandName: shopData.brandName,
+      layoutDesign: shopData.layoutDesign,
       contactEmail: shopData.contactEmail,
       shopPhone: shopData.shopPhone,
       owner: userId,
