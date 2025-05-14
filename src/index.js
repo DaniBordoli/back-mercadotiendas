@@ -8,6 +8,11 @@ const { errorHandler, notFound } = require('./middlewares/error');
 
 const app = express();
 
+// Root health check endpoint
+app.get('/', (req, res) => {
+  res.json({ success: true, message: 'Server is running' });
+});
+
 // Conectar a MongoDB
 connectDB();
 
