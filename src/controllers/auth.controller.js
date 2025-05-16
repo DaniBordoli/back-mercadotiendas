@@ -62,7 +62,6 @@ const resetPassword = async (req, res) => {
 const verifyResetToken = async (req, res) => {
   try {
     const { token } = req.params;
-    
     const user = await User.findOne({
       resetPasswordToken: token,
       resetPasswordExpires: { $gt: Date.now() }
@@ -72,7 +71,8 @@ const verifyResetToken = async (req, res) => {
       return errorResponse(res, 'Token inválido o expirado', 400);
     }
 
-    return successResponse(res, { valid: true }, 'Token válido');
+    const responseData = { valid: true, email: user.email };
+    return successResponse(res, responseData, 'Token válido');
   } catch (error) {
     return errorResponse(res, 'Error al verificar el token', 500, error.message);
   }
