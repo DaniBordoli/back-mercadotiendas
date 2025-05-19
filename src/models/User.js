@@ -47,6 +47,11 @@ const userSchema = new mongoose.Schema({
     type: Date,
     required: false
   },
+  userPhone: {
+    type: String,
+    Optional: true
+
+  },
   city: {
     type: String,
     required: false
