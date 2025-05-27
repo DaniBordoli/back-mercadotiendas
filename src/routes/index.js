@@ -4,6 +4,7 @@ const userRoutes = require('./user.routes');
 const testRoutes = require('./test.routes');
 const shopRoutes = require('./shop.routes');
 const aiRoutes = require('./ai.routes');
+const productsRoutes = require('./products.routes');
 
 // Rutas de autenticación (/api/auth/*)
 router.use('/auth', authRoutes);
@@ -16,6 +17,9 @@ router.use('/shops', shopRoutes);
 
 // Rutas de IA (/api/ai/*)
 router.use('/ai', aiRoutes);
+
+// Rutas de productos (/api/products/*)
+router.use('/products', productsRoutes);
 
 // Rutas de prueba (/api/test/*)
 router.use('/test', testRoutes);
