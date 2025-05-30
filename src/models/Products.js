@@ -17,6 +17,9 @@ const productSchema = new mongoose.Schema({
   estado: {
     type: String,
   },
+  productImages: [{
+    type: String,
+  }],
   precio: {
     type: String
   },
@@ -29,6 +32,12 @@ const productSchema = new mongoose.Schema({
   subcategoria: {
     type: String
   },
+   color: [{
+    type: String
+  }],
+   talle: [{
+    type: String
+  }],
   createdAt: {
     type: Date,
     default: Date.now

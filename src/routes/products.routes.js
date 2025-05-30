@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('../middlewares/auth');
-const { createProduct, updateProduct, deleteProduct, getProducts, getProductById } = require('../controllers/product.controller');
+const { createProduct, updateProduct, deleteProduct, getProducts, getProductById, addProductImages, deleteProductImage } = require('../controllers/product.controller');
 
 // Obtener productos
 router.get('/', verifyToken, getProducts);
@@ -17,5 +17,11 @@ router.put('/:id', verifyToken, updateProduct);
 
 // Eliminar producto
 router.delete('/:id', verifyToken, deleteProduct);
+
+// Ruta para agregar imágenes al producto (múltiples)
+router.post('/:id/images', verifyToken, addProductImages);
+
+// Ruta para eliminar una imagen específica del producto
+router.delete('/:id/images', verifyToken, deleteProductImage);
 
 module.exports = router;
