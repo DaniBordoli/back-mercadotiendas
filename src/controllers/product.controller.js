@@ -47,6 +47,13 @@ exports.createProduct = (req, res) => {
         }
       }
       console.log('[createProduct] productImages:', productImages); // <-- Depuración
+
+      // Obtener la tienda del usuario autenticado
+      const user = req.user;
+      if (!user || !user.shop) {
+        return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
+      }
+
       const product = new Product({
         nombre,
         descripcion,
@@ -57,7 +64,8 @@ exports.createProduct = (req, res) => {
         subcategoria,
         productImages,
         color,
-        talle
+        talle,
+        shop: user.shop 
       });
       await product.save();
       return successResponse(res, product, 'Producto creado exitosamente');
@@ -67,21 +75,29 @@ exports.createProduct = (req, res) => {
   });
 };
 
-// Obtener productos
+
 exports.getProducts = async (req, res) => {
   try {
-    const products = await Product.find();
+    const user = req.user;
+    if (!user || !user.shop) {
+      return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
+    }
+    const products = await Product.find({ shop: user.shop });
     return successResponse(res, products, 'Productos obtenidos exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al obtener los productos', 500, error.message);
   }
 };
 
-// Obtener producto por ID
+
 exports.getProductById = async (req, res) => {
   try {
     const { id } = req.params;
-    const product = await Product.findById(id);
+    const user = req.user;
+    if (!user || !user.shop) {
+      return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
+    }
+    const product = await Product.findOne({ _id: id, shop: user.shop });
     if (!product) {
       return errorResponse(res, 'Producto no encontrado', 404);
     }
@@ -91,10 +107,14 @@ exports.getProductById = async (req, res) => {
   }
 };
 
-// Editar producto
+
 exports.updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
+    const user = req.user;
+    if (!user || !user.shop) {
+      return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
+    }
     // Solo permitir los campos editables
     const allowedFields = ['nombre', 'sku', 'descripcion', 'precio', 'stock', 'categoria', 'estado', 'productImages', 'color', 'talle'];
     const updates = {};
@@ -113,7 +133,7 @@ exports.updateProduct = async (req, res) => {
         }
       }
     });
-    const product = await Product.findByIdAndUpdate(id, updates, { new: true });
+    const product = await Product.findOneAndUpdate({ _id: id, shop: user.shop }, updates, { new: true });
     if (!product) {
       return errorResponse(res, 'Producto no encontrado', 404);
     }
@@ -123,11 +143,15 @@ exports.updateProduct = async (req, res) => {
   }
 };
 
-// Eliminar producto
+
 exports.deleteProduct = async (req, res) => {
   try {
     const { id } = req.params;
-    const product = await Product.findByIdAndDelete(id);
+    const user = req.user;
+    if (!user || !user.shop) {
+      return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
+    }
+    const product = await Product.findOneAndDelete({ _id: id, shop: user.shop });
     if (!product) {
       return errorResponse(res, 'Producto no encontrado', 404);
     }
@@ -137,7 +161,7 @@ exports.deleteProduct = async (req, res) => {
   }
 };
 
-// Nueva función para agregar imágenes al producto
+
 exports.addProductImages = async (req, res) => {
     uploadProductImages(req, res, async (err) => {
         if (err instanceof multer.MulterError) {
@@ -152,7 +176,11 @@ exports.addProductImages = async (req, res) => {
             }
 
             const { id } = req.params;
-            const product = await Product.findById(id);
+            const user = req.user;
+            if (!user || !user.shop) {
+              return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
+            }
+            const product = await Product.findOne({ _id: id, shop: user.shop });
             if (!product) {
                 return errorResponse(res, 'Producto no encontrado', 404);
             }
@@ -173,15 +201,19 @@ exports.addProductImages = async (req, res) => {
     });
 };
 
-// Nueva función para eliminar una imagen específica del producto
+
 exports.deleteProductImage = async (req, res) => {
     try {
         const { id } = req.params;
         const { imageUrl } = req.body;
+        const user = req.user;
+        if (!user || !user.shop) {
+          return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
+        }
         if (!imageUrl) {
             return errorResponse(res, 'URL de imagen requerida', 400);
         }
-        const product = await Product.findById(id);
+        const product = await Product.findOne({ _id: id, shop: user.shop });
         if (!product) {
             return errorResponse(res, 'Producto no encontrado', 404);
         }

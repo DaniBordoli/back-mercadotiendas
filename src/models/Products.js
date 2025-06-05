@@ -38,6 +38,11 @@ const productSchema = new mongoose.Schema({
    talle: [{
     type: String
   }],
+  shop: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Shop',
+    required: true
+  },
   createdAt: {
     type: Date,
     default: Date.now
