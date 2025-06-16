@@ -6,6 +6,7 @@ const shopRoutes = require('./shop.routes');
 const aiRoutes = require('./ai.routes');
 const productsRoutes = require('./products.routes');
 const categoryRoutes = require('./category.routes');
+const paymentRoutes = require('./payment.routes');
 
 // Rutas de autenticación (/api/auth/*)
 router.use('/auth', authRoutes);
@@ -24,6 +25,9 @@ router.use('/products', productsRoutes);
 
 // Rutas de categorías (/api/categories/*)
 router.use('/categories', categoryRoutes);
+
+// Rutas de pagos (/api/payments/*)
+router.use('/payments', paymentRoutes);
 
 // Rutas de prueba (/api/test/*)
 router.use('/test', testRoutes);

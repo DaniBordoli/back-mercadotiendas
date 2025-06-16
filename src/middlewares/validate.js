@@ -17,7 +17,7 @@ const validationRules = {
       .trim()
       .notEmpty().withMessage('La contraseña es requerida')
       .isLength({ min: 8 }).withMessage('La contraseña debe tener al menos 8 caracteres')
-      .matches(/^(?=.*[A-Z])(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>/?]).{8,}$/)
+      .matches(/^(?=.*[A-Z])(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{8,}$/)
       .withMessage('La contraseña debe contener al menos una mayúscula y un carácter especial'),
     body('passwordConfirm')
       .trim()
@@ -28,6 +28,72 @@ const validationRules = {
         }
         return true;
       })
+  ],
+  
+  // Validación para crear checkout de Mobbex
+  createCheckout: [
+    // Validación de datos del pedido
+    body('orderData')
+      .notEmpty().withMessage('Los datos del pedido son requeridos')
+      .isObject().withMessage('Los datos del pedido deben ser un objeto'),
+    body('orderData.total')
+      .notEmpty().withMessage('El monto total es requerido')
+      .isNumeric().withMessage('El monto total debe ser un número')
+      .custom(value => {
+        if (value <= 0) {
+          throw new Error('El monto total debe ser mayor a 0');
+        }
+        return true;
+      }),
+    body('orderData.description')
+      .optional()
+      .isString().withMessage('La descripción debe ser un texto'),
+    body('orderData.reference')
+      .optional()
+      .isString().withMessage('La referencia debe ser un texto'),
+    
+    // Validación de datos del cliente
+    body('customerData')
+      .notEmpty().withMessage('Los datos del cliente son requeridos')
+      .isObject().withMessage('Los datos del cliente deben ser un objeto'),
+    body('customerData.email')
+      .notEmpty().withMessage('El email del cliente es requerido')
+      .isEmail().withMessage('Email inválido'),
+    body('customerData.name')
+      .optional()
+      .isString().withMessage('El nombre debe ser un texto'),
+    body('customerData.identification')
+      .optional()
+      .isString().withMessage('La identificación debe ser un texto'),
+    
+    // Validación de items
+    body('items')
+      .notEmpty().withMessage('Los items son requeridos')
+      .isArray().withMessage('Los items deben ser un array')
+      .custom(items => {
+        if (items.length === 0) {
+          throw new Error('Se requiere al menos un item');
+        }
+        return true;
+      }),
+    body('items.*.name')
+      .notEmpty().withMessage('El nombre del item es requerido')
+      .isString().withMessage('El nombre del item debe ser un texto'),
+    body('items.*.price')
+      .notEmpty().withMessage('El precio del item es requerido')
+      .isNumeric().withMessage('El precio debe ser un número')
+      .custom(value => {
+        if (value <= 0) {
+          throw new Error('El precio debe ser mayor a 0');
+        }
+        return true;
+      }),
+    body('items.*.quantity')
+      .optional()
+      .isInt({ min: 1 }).withMessage('La cantidad debe ser un número entero mayor a 0'),
+    body('items.*.description')
+      .optional()
+      .isString().withMessage('La descripción debe ser un texto')
   ],
 
   login: [
