@@ -82,7 +82,8 @@ exports.getProducts = async (req, res) => {
     if (!user || !user.shop) {
       return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
     }
-    const products = await Product.find({ shop: user.shop });
+    // Cambiado: populate para traer el nombre de la tienda
+    const products = await Product.find({ shop: user.shop }).populate('shop', 'name');
     return successResponse(res, products, 'Productos obtenidos exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al obtener los productos', 500, error.message);
@@ -97,7 +98,8 @@ exports.getProductById = async (req, res) => {
     if (!user || !user.shop) {
       return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
     }
-    const product = await Product.findOne({ _id: id, shop: user.shop });
+    // Cambiado: populate para traer el nombre de la tienda
+    const product = await Product.findOne({ _id: id, shop: user.shop }).populate('shop', 'name');
     if (!product) {
       return errorResponse(res, 'Producto no encontrado', 404);
     }
@@ -230,4 +232,15 @@ exports.deleteProductImage = async (req, res) => {
     } catch (error) {
         return errorResponse(res, 'Error al eliminar la imagen del producto', 500, error.message);
     }
+};
+
+// Obtener todos los productos (sin filtrar por tienda)
+exports.getAllProducts = async (req, res) => {
+  try {
+    // Cambiado: populate para traer el nombre de la tienda
+    const products = await Product.find({}).populate('shop', 'name');
+    return successResponse(res, products, 'Todos los productos obtenidos exitosamente');
+  } catch (error) {
+    return errorResponse(res, 'Error al obtener todos los productos', 500, error.message);
+  }
 };
