@@ -7,6 +7,7 @@ const aiRoutes = require('./ai.routes');
 const productsRoutes = require('./products.routes');
 const categoryRoutes = require('./category.routes');
 const paymentRoutes = require('./payment.routes');
+const shopSingleRoutes = require('./shop.routes');
 
 // Rutas de autenticación (/api/auth/*)
 router.use('/auth', authRoutes);
@@ -16,6 +17,9 @@ router.use('/users', userRoutes);
 
 // Rutas de tienda (/api/shops/*)
 router.use('/shops', shopRoutes);
+
+// Rutas de tienda principal (/api/shop/*)
+router.use('/shop', shopSingleRoutes);
 
 // Rutas de IA (/api/ai/*)
 router.use('/ai', aiRoutes);

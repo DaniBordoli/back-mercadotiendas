@@ -18,6 +18,25 @@ const upload = multer({
     }
 }).single('image'); // 'image' es el nombre del campo en el formulario
 
+const deepMerge = (target, source) => {
+  for (const key in source) {
+    if (
+      source[key] &&
+      typeof source[key] === 'object' &&
+      !Array.isArray(source[key]) &&
+      target[key] &&
+      typeof target[key] === 'object'
+    ) {
+      
+      target[key] = deepMerge(target[key], source[key]);
+    } else {
+      
+      target[key] = source[key];
+    }
+  }
+  return target;
+};
+
 exports.createShop = async (req, res) => {
   try {
     const shopData = req.body;
@@ -202,5 +221,41 @@ exports.deleteShop = async (req, res) => {
   } catch (err) {
     console.error('Error al eliminar tienda:', err);
     return errorResponse(res, 'Error al eliminar tienda', 500);
+  }
+};
+
+exports.updateShopTemplate = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { templateUpdate } = req.body;
+    if (!templateUpdate || typeof templateUpdate !== 'object') {
+      return errorResponse(res, 'templateUpdate es requerido y debe ser un objeto', 400);
+    }
+    const user = await User.findById(userId).populate('shop');
+    if (!user || !user.shop) {
+      return errorResponse(res, 'Tienda no encontrada para el usuario', 404);
+    }
+    const current = user.shop.templateUpdate || {};
+    const merged = deepMerge({ ...current }, templateUpdate);
+    user.shop.templateUpdate = merged;
+    await user.shop.save();
+    return successResponse(res, user.shop, 'Template actualizado correctamente');
+  } catch (error) {
+    console.error('Error actualizando templateUpdate:', error);
+    return errorResponse(res, 'Error actualizando templateUpdate', 500);
+  }
+};
+
+exports.getShopTemplate = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const User = require('../models/User');
+    const user = await User.findById(userId).populate('shop');
+    if (!user || !user.shop) {
+      return res.status(404).json({ message: 'Tienda no encontrada para el usuario' });
+    }
+    return res.json({ templateUpdate: user.shop.templateUpdate || {} });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error obteniendo estilos de tienda', error: error.message });
   }
 };
