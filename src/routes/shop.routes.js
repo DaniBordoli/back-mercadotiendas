@@ -1,10 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const { createShop, getShop, updateShop, deleteShop } = require('../controllers/shop.controller');
+const { createShop, getShop, updateShop, deleteShop, updateShopTemplate, getShopTemplate } = require('../controllers/shop.controller');
 const { verifyToken } = require('../middlewares/auth');
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
+
+router.put('/template', updateShopTemplate);
+
+router.get('/template', getShopTemplate);
 
 // Crear tienda
 router.post('/', createShop);

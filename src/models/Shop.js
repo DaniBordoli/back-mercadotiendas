@@ -58,6 +58,10 @@ const shopSchema = new mongoose.Schema({
   imageUrl: {
     type: String
   },
+  templateUpdate: {
+    type: Object,
+    default: {}
+  },
   active: {
     type: Boolean,
     default: true
