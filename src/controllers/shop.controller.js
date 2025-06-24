@@ -238,6 +238,23 @@ exports.updateShopTemplate = async (req, res) => {
     const current = user.shop.templateUpdate || {};
     const merged = deepMerge({ ...current }, templateUpdate);
     user.shop.templateUpdate = merged;
+    
+    // Sincronizar ciertas propiedades del template con el modelo Shop
+    const shopUpdates = {};
+    if (templateUpdate.title) {
+      shopUpdates.name = templateUpdate.title;
+    }
+    
+    if (templateUpdate.shopName) {
+      shopUpdates.name = templateUpdate.shopName;
+    }
+    
+    // Aplicar actualizaciones al modelo Shop si hay cambios
+    if (Object.keys(shopUpdates).length > 0) {
+      console.log('Sincronizando datos del template con Shop:', shopUpdates);
+      Object.assign(user.shop, shopUpdates);
+    }
+    
     await user.shop.save();
     return successResponse(res, user.shop, 'Template actualizado correctamente');
   } catch (error) {
