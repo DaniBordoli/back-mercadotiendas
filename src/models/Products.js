@@ -32,11 +32,15 @@ const productSchema = new mongoose.Schema({
   subcategoria: {
     type: String
   },
-   color: [{
-    type: String
-  }],
-   talle: [{
-    type: String
+  variantes: [{
+    tipo: {
+      type: String,
+      required: true
+    },
+    valores: [{
+      type: String,
+      required: true
+    }]
   }],
   shop: {
     type: mongoose.Schema.Types.ObjectId,
