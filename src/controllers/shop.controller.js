@@ -263,6 +263,23 @@ exports.updateShopTemplate = async (req, res) => {
   }
 };
 
+exports.getMyShop = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    const user = await User.findById(userId).populate('shop');
+    
+    if (!user || !user.shop) {
+      return errorResponse(res, 'Usuario no tiene tienda asociada', 404);
+    }
+
+    return successResponse(res, { shop: user.shop });
+  } catch (err) {
+    console.error('Error al obtener tienda del usuario:', err);
+    return errorResponse(res, 'Error al obtener tienda', 500);
+  }
+};
+
 exports.getShopTemplate = async (req, res) => {
   try {
     const userId = req.user.id;
