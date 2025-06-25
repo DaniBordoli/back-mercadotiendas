@@ -27,17 +27,18 @@ exports.createProduct = (req, res) => {
 
     try {
       const { nombre, descripcion, sku, estado, precio, categoria, subcategoria } = req.body;
-      // Procesar color y talle como arrays
-      let color = req.body.color;
-      let talle = req.body.talle;
-      if (typeof color === 'string') {
-        try { color = JSON.parse(color); } catch { color = [color]; }
+      
+      // Procesar variantes
+      let variantes = req.body.variantes;
+      if (typeof variantes === 'string') {
+        try { 
+          variantes = JSON.parse(variantes); 
+        } catch { 
+          variantes = []; 
+        }
       }
-      if (!Array.isArray(color)) color = color ? [color] : [];
-      if (typeof talle === 'string') {
-        try { talle = JSON.parse(talle); } catch { talle = [talle]; }
-      }
-      if (!Array.isArray(talle)) talle = talle ? [talle] : [];
+      if (!Array.isArray(variantes)) variantes = [];
+
       console.log('[createProduct] req.files:', req.files); // <-- Depuración
       let productImages = [];
       if (req.files && req.files.length > 0) {
@@ -63,8 +64,7 @@ exports.createProduct = (req, res) => {
         categoria,
         subcategoria,
         productImages,
-        color,
-        talle,
+        variantes,
         shop: user.shop 
       });
       await product.save();
@@ -118,17 +118,17 @@ exports.updateProduct = async (req, res) => {
       return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
     }
     // Solo permitir los campos editables
-    const allowedFields = ['nombre', 'sku', 'descripcion', 'precio', 'stock', 'categoria', 'estado', 'productImages', 'color', 'talle'];
+    const allowedFields = ['nombre', 'sku', 'descripcion', 'precio', 'stock', 'categoria', 'estado', 'productImages', 'variantes'];
     const updates = {};
     allowedFields.forEach(field => {
       if (req.body[field] !== undefined) {
-        // Procesar color y talle como arrays
-        if ((field === 'color' || field === 'talle')) {
+        // Procesar variantes como array
+        if (field === 'variantes') {
           let value = req.body[field];
           if (typeof value === 'string') {
-            try { value = JSON.parse(value); } catch { value = [value]; }
+            try { value = JSON.parse(value); } catch { value = []; }
           }
-          if (!Array.isArray(value)) value = value ? [value] : [];
+          if (!Array.isArray(value)) value = [];
           updates[field] = value;
         } else {
           updates[field] = req.body[field];

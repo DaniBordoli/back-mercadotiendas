@@ -236,14 +236,116 @@ exports.updateShopTemplate = async (req, res) => {
       return errorResponse(res, 'Tienda no encontrada para el usuario', 404);
     }
     const current = user.shop.templateUpdate || {};
+    
+    // Preservar el logoUrl actual si no se está enviando uno nuevo explícitamente
+    if (current.logoUrl && !templateUpdate.logoUrl) {
+      templateUpdate.logoUrl = current.logoUrl;
+    }
+    
     const merged = deepMerge({ ...current }, templateUpdate);
     user.shop.templateUpdate = merged;
+    
+    // Sincronizar ciertas propiedades del template con el modelo Shop
+    const shopUpdates = {};
+    if (templateUpdate.title) {
+      shopUpdates.name = templateUpdate.title;
+    }
+    
+    if (templateUpdate.shopName) {
+      shopUpdates.name = templateUpdate.shopName;
+    }
+    
+    // Aplicar actualizaciones al modelo Shop si hay cambios
+    if (Object.keys(shopUpdates).length > 0) {
+      console.log('Sincronizando datos del template con Shop:', shopUpdates);
+      Object.assign(user.shop, shopUpdates);
+    }
+    
     await user.shop.save();
     return successResponse(res, user.shop, 'Template actualizado correctamente');
   } catch (error) {
     console.error('Error actualizando templateUpdate:', error);
     return errorResponse(res, 'Error actualizando templateUpdate', 500);
   }
+};
+
+exports.getMyShop = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    const user = await User.findById(userId).populate('shop');
+    
+    if (!user || !user.shop) {
+      return errorResponse(res, 'Usuario no tiene tienda asociada', 404);
+    }
+
+    return successResponse(res, { shop: user.shop });
+  } catch (err) {
+    console.error('Error al obtener tienda del usuario:', err);
+    return errorResponse(res, 'Error al obtener tienda', 500);
+  }
+};
+
+exports.updateShopLogo = async (req, res) => {
+  // Manejar la carga del archivo
+  upload(req, res, async (err) => {
+    if (err instanceof multer.MulterError) {
+      return errorResponse(res, 'Error al subir el archivo: ' + err.message, 400);
+    } else if (err) {
+      return errorResponse(res, 'Error al procesar el archivo: ' + err.message, 400);
+    }
+
+    try {
+      const userId = req.user.id;
+      
+      // Verificar que se subió una imagen
+      if (!req.file) {
+        return errorResponse(res, 'No se encontró archivo de imagen', 400);
+      }
+
+      // Buscar la tienda del usuario
+      const user = await User.findById(userId).populate('shop');
+      if (!user || !user.shop) {
+        return errorResponse(res, 'Tienda no encontrada', 404);
+      }
+
+      const shop = user.shop;
+
+      try {
+        // Si ya existe un logo, eliminar el anterior de Cloudinary
+        if (shop.imageUrl) {
+          await cloudinaryService.deleteImage(shop.imageUrl);
+        }
+
+        // Subir la nueva imagen a Cloudinary
+        const uploadResult = await cloudinaryService.uploadImage(req.file.buffer, 'shop-logos');
+
+        // Actualizar la URL del logo en la tienda
+        shop.imageUrl = uploadResult;
+        
+        // También actualizar en templateUpdate para que se refleje en el frontend
+        if (!shop.templateUpdate) {
+          shop.templateUpdate = {};
+        }
+        shop.templateUpdate.logoUrl = uploadResult;
+        
+        await shop.save();
+
+        return successResponse(res, {
+          message: 'Logo actualizado exitosamente',
+          logoUrl: uploadResult
+        });
+
+      } catch (uploadError) {
+        console.error('Error al subir imagen a Cloudinary:', uploadError);
+        return errorResponse(res, 'Error al procesar la imagen', 500);
+      }
+
+    } catch (err) {
+      console.error('Error al actualizar logo:', err);
+      return errorResponse(res, 'Error interno al actualizar logo', 500);
+    }
+  });
 };
 
 exports.getShopTemplate = async (req, res) => {
