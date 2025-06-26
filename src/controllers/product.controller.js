@@ -26,7 +26,7 @@ exports.createProduct = (req, res) => {
     }
 
     try {
-      const { nombre, descripcion, sku, estado, precio, categoria, subcategoria } = req.body;
+      const { nombre, descripcion, sku, estado, precio, categoria, stock, subcategoria } = req.body;
       
       // Procesar variantes
       let variantes = req.body.variantes;
@@ -65,6 +65,7 @@ exports.createProduct = (req, res) => {
         subcategoria,
         productImages,
         variantes,
+        stock,
         shop: user.shop 
       });
       await product.save();

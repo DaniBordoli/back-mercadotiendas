@@ -11,5 +11,7 @@ router.delete('/:id', verifyToken, categoryController.deleteCategory);
 router.get('/', verifyToken, categoryController.getAllCategories);
 // Obtener una categoría por ID
 router.get('/:id', verifyToken, categoryController.getCategoryById);
+// Actualizar categoría
+router.put('/:id', verifyToken, categoryController.updateCategory);
 
 module.exports = router;
