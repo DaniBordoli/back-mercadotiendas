@@ -56,9 +56,7 @@ exports.createShop = async (req, res) => {
     if (!shopData.subdomain || !/^[a-z0-9-]{3,30}$/.test(shopData.subdomain)) {
         return errorResponse(res, 'Subdominio inválido o faltante (3-30 caracteres, solo minúsculas, números, guiones).', 400);
     }
-    // Use 'address' field to store subdomain, assuming that's the unique identifier in the model
-    // If you have a dedicated 'subdomain' field in the model, use that instead.
-    const existingShop = await Shop.findOne({ address: shopData.subdomain });
+    const existingShop = await Shop.findOne({ subdomain: shopData.subdomain });
     if (existingShop) {
        return errorResponse(res, 'El subdominio ya está en uso', 400);
     }
@@ -73,7 +71,8 @@ exports.createShop = async (req, res) => {
       name: shopData.shopName,
       description: shopData.description || '', // Provide default if optional
       category: shopData.category || 'other', // Provide default if optional
-      address: shopData.subdomain, // Storing subdomain in address field
+      address: shopData.address || '', // Dirección física
+      subdomain: shopData.subdomain, // Subdominio http
       layoutDesign: shopData.layoutDesign,
       contactEmail: shopData.contactEmail,
       shopPhone: shopData.shopPhone,
@@ -95,7 +94,6 @@ exports.createShop = async (req, res) => {
 
     // Return the created shop data along with the success message
     return successResponse(res, {
-      message: 'Tienda creada exitosamente',
       shop: newShop.toObject() // Send plain object
     });
 

@@ -29,7 +29,8 @@ const shopSchema = new mongoose.Schema({
     required: true
   },
   shopPhone: {
-    type: String
+    type: String,
+    optional: true
   },
   taxAdress: {
     type: String,
@@ -73,6 +74,12 @@ const shopSchema = new mongoose.Schema({
   updatedAt: {
     type: Date,
     default: Date.now
+  },
+  subdomain: {
+    type: String,
+    required: true,
+    unique: true,
+    trim: true
   }
 });
 
