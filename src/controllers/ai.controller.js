@@ -85,8 +85,17 @@ const handleChat = async (req, res) => {
                 }
             }, 'Confirmación recibida, proceder a crear tienda');
         }
+       
         return successResponse(res, {
-            reply: '',
+            reply: `¡Perfecto! He recopilado toda la información necesaria para tu tienda. Aquí está el resumen:
+
+🏪 **Nombre de la tienda:** ${currentTemplate.shopName}
+🎨 **Diseño:** ${currentTemplate.layoutDesign}
+📧 **Email de contacto:** ${currentTemplate.contactEmail}
+📞 **Teléfono:** ${currentTemplate.shopPhone}
+🌐 **Subdominio:** ${currentTemplate.subdomain}
+
+¿Quieres que proceda a crear tu tienda con esta información?`,
             templateUpdates: null,
             isFinalStep: true,
             shopData: {
@@ -96,7 +105,7 @@ const handleChat = async (req, res) => {
                 shopPhone: currentTemplate.shopPhone,
                 subdomain: currentTemplate.subdomain
             }
-        }, 'Datos completos para crear tienda');
+        }, 'Resumen completo y datos listos para crear tienda');
     } catch (error) {
         console.error("Error in AI chat controller:", error);
         return errorResponse(res, error.message || 'Error processing AI chat request', 500);

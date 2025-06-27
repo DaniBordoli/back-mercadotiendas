@@ -76,6 +76,8 @@ exports.createShop = async (req, res) => {
       layoutDesign: shopData.layoutDesign,
       contactEmail: shopData.contactEmail,
       shopPhone: shopData.shopPhone,
+      primaryColor: shopData.primaryColor || '',
+      secondaryColor: shopData.secondaryColor || '',
       owner: userId,
       // active: true, // Default is true in model
       // imageUrl: null, // Default is null
@@ -251,6 +253,15 @@ exports.updateShopTemplate = async (req, res) => {
     
     if (templateUpdate.shopName) {
       shopUpdates.name = templateUpdate.shopName;
+    }
+    
+    // Sincronizar colores con el modelo Shop
+    if (templateUpdate.primaryColor) {
+      shopUpdates.primaryColor = templateUpdate.primaryColor;
+    }
+    
+    if (templateUpdate.secondaryColor) {
+      shopUpdates.secondaryColor = templateUpdate.secondaryColor;
     }
     
     // Aplicar actualizaciones al modelo Shop si hay cambios
