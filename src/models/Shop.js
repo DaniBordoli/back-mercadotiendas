@@ -10,6 +10,22 @@ const shopSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  mission: {
+    type: String,
+    trim: true
+  },
+  vision: {
+    type: String,
+    trim: true
+  },
+  history: {
+    type: String,
+    trim: true
+  },
+  values: {
+    type: String,
+    trim: true
+  },
   owner: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -29,7 +45,16 @@ const shopSchema = new mongoose.Schema({
     required: true
   },
   shopPhone: {
-    type: String
+    type: String,
+    optional: true
+  },
+  primaryColor: {
+    type: String,
+    optional: true
+  },
+  secondaryColor: {
+    type: String,
+    optional: true
   },
   taxAdress: {
     type: String,
@@ -73,6 +98,12 @@ const shopSchema = new mongoose.Schema({
   updatedAt: {
     type: Date,
     default: Date.now
+  },
+  subdomain: {
+    type: String,
+    required: true,
+    unique: true,
+    trim: true
   }
 });
 
