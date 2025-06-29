@@ -17,4 +17,4 @@ const ShopSocialSchema = new mongoose.Schema({
   telefonoAdicional: { type: String, default: '' }
 }, { timestamps: true });
 
-module.exports = mongoose.model('ShopSocial', ShopSocialSchema);
+module.exports = mongoose.model('shopnetwork', ShopSocialSchema);
