@@ -38,12 +38,21 @@ const deepMerge = (target, source) => {
 };
 
 exports.createShop = async (req, res) => {
-  try {
-    const shopData = req.body;
-    console.log('Received shop data for creation:', shopData);
-    console.log('User from token:', req.user);
+  // Manejar la carga del archivo (logo)
+  upload(req, res, async (err) => {
+    if (err instanceof multer.MulterError) {
+      return errorResponse(res, 'Error al subir el logo: ' + err.message, 400);
+    } else if (err) {
+      return errorResponse(res, 'Error al procesar el logo: ' + err.message, 400);
+    }
 
-    const userId = req.user.id;
+    try {
+      const shopData = req.body;
+      console.log('Received shop data for creation:', shopData);
+      console.log('User from token:', req.user);
+      console.log('File received:', req.file ? 'Yes' : 'No');
+
+      const userId = req.user.id;
     const user = await User.findById(userId);
     if (!user) {
       return errorResponse(res, 'Usuario no encontrado', 404);
@@ -84,6 +93,22 @@ exports.createShop = async (req, res) => {
       // templateConfig: shopData.templateConfig, // Add if saving template details
     };
 
+    // Si hay un logo, subirlo a Cloudinary
+    if (req.file) {
+      try {
+        const logoUrl = await cloudinaryService.uploadImage(req.file.buffer, 'shop-logos');
+        shopModelData.imageUrl = logoUrl;
+        
+        // También establecer en templateUpdate para el frontend
+        shopModelData.templateUpdate = {
+          logoUrl: logoUrl
+        };
+      } catch (uploadError) {
+        console.error('Error al subir logo a Cloudinary:', uploadError);
+        return errorResponse(res, 'Error al procesar el logo', 500);
+      }
+    }
+
     console.log('Attempting to save shop with data:', shopModelData);
     const newShop = new Shop(shopModelData);
     await newShop.save();
@@ -99,14 +124,15 @@ exports.createShop = async (req, res) => {
       shop: newShop.toObject() // Send plain object
     });
 
-  } catch (err) {
-    console.error('Error al crear tienda:', err);
-    // Handle potential duplicate key errors on other fields if necessary
-    if (err.code === 11000) {
-         return errorResponse(res, 'Error: Hubo un conflicto al guardar la tienda (posible duplicado).', 409);
+    } catch (err) {
+      console.error('Error al crear tienda:', err);
+      // Handle potential duplicate key errors on other fields if necessary
+      if (err.code === 11000) {
+           return errorResponse(res, 'Error: Hubo un conflicto al guardar la tienda (posible duplicado).', 409);
+      }
+      return errorResponse(res, 'Error interno al crear tienda', 500);
     }
-    return errorResponse(res, 'Error interno al crear tienda', 500);
-  }
+  });
 };
 
 exports.getShop = async (req, res) => {

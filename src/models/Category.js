@@ -10,24 +10,10 @@ const CategorySchema = new mongoose.Schema({
     type: String,
     default: ''
   },
-  image: {
-    type: String,
-    default: '' 
-  },
-  status: {
-    type: String,
-    enum: ['Active', 'Pending', 'Inactive'],
-    default: 'Pending'
-  },
   parent: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Category',
     default: null
-  },
-  shop: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Shop',
-    required: true
   }
 }, {
   timestamps: true

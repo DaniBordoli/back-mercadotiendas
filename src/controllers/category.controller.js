@@ -4,22 +4,18 @@ const { successResponse, errorResponse } = require('../utils/response');
 // Crear una nueva categoría
 exports.createCategory = async (req, res) => {
   try {
-    const { name, description, image, status, parent } = req.body;
-    const user = req.user;
-    if (!user || !user.shop) {
-      return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
-    }
+    const { name, description, parent } = req.body;
+    
     if (!name) {
       return errorResponse(res, 'El nombre es obligatorio', 400);
     }
+    
     const category = new Category({
       name,
       description,
-      image,
-      status,
-      parent: parent || null,
-      shop: user.shop
+      parent: parent || null
     });
+    
     await category.save();
     return successResponse(res, category, 'Categoría creada exitosamente');
   } catch (error) {
@@ -44,11 +40,7 @@ exports.deleteCategory = async (req, res) => {
 // Obtener todas las categorías
 exports.getAllCategories = async (req, res) => {
   try {
-    const user = req.user;
-    if (!user || !user.shop) {
-      return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
-    }
-    const categories = await Category.find({ shop: user.shop }).lean();
+    const categories = await Category.find({}).lean();
     return successResponse(res, categories, 'Categorías obtenidas exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al obtener las categorías', 500, error.message);
@@ -59,14 +51,12 @@ exports.getAllCategories = async (req, res) => {
 exports.getCategoryById = async (req, res) => {
   try {
     const { id } = req.params;
-    const user = req.user;
-    if (!user || !user.shop) {
-      return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
-    }
-    const category = await Category.findOne({ _id: id, shop: user.shop }).lean();
+    
+    const category = await Category.findById(id).lean();
     if (!category) {
       return errorResponse(res, 'Categoría no encontrada', 404);
     }
+    
     return successResponse(res, category, 'Categoría obtenida exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al obtener la categoría', 500, error.message);
@@ -77,20 +67,17 @@ exports.getCategoryById = async (req, res) => {
 exports.updateCategory = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, image, status, parent } = req.body;
-    const user = req.user;
-    if (!user || !user.shop) {
-      return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
-    }
-    const category = await Category.findOne({ _id: id, shop: user.shop });
+    const { name, description, parent } = req.body;
+    
+    const category = await Category.findById(id);
     if (!category) {
       return errorResponse(res, 'Categoría no encontrada', 404);
     }
+    
     if (name !== undefined) category.name = name;
     if (description !== undefined) category.description = description;
-    if (image !== undefined) category.image = image;
-    if (status !== undefined) category.status = status;
     if (parent !== undefined) category.parent = parent;
+    
     await category.save();
     return successResponse(res, category, 'Categoría actualizada exitosamente');
   } catch (error) {
