@@ -10,6 +10,7 @@ const paymentRoutes = require('./payment.routes');
 const shopSingleRoutes = require('./shop.routes');
 const shopSocialRoutes = require('./shopsocial.routes');
 const currencyRoutes = require('./currency.routes');
+const shopInstitutionalRoutes = require('./shopInstitutional.routes');
 
 // Rutas de autenticación (/api/auth/*)
 router.use('/auth', authRoutes);
@@ -43,6 +44,9 @@ router.use('/shopsocial', shopSocialRoutes);
 
 // Rutas de monedas (/api/currencies/*)
 router.use('/currencies', currencyRoutes);
+
+// Rutas de información institucional (/api/shop-institutional/*)
+router.use('/shop-institutional', shopInstitutionalRoutes);
 
 // Ruta de health check
 router.get('/health', (req, res) => {
