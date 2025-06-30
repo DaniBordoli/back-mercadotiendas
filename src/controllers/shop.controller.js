@@ -85,8 +85,10 @@ exports.createShop = async (req, res) => {
       layoutDesign: shopData.layoutDesign,
       contactEmail: shopData.contactEmail,
       shopPhone: shopData.shopPhone,
-      // Los colores ahora van solo en templateUpdate
-      templateUpdate: shopData.templateUpdate || {},
+      // Los colores y estilos ahora van solo en templateUpdate
+      templateUpdate: shopData.templateUpdate && Object.keys(shopData.templateUpdate).length > 0 
+        ? shopData.templateUpdate 
+        : null, // Usar null en lugar de {} para indicar que no hay template configurado
       owner: userId,
       // active: true, // Default is true in model
       // imageUrl: null, // Default is null
@@ -400,7 +402,16 @@ exports.getShopTemplate = async (req, res) => {
     if (!user || !user.shop) {
       return errorResponse(res, 'Tienda no encontrada para el usuario', 404);
     }
-    return successResponse(res, { templateUpdate: user.shop.templateUpdate || {} });
+    
+    // Si templateUpdate está vacío o no existe, devolver null para que el frontend use defaults
+    const templateUpdate = user.shop.templateUpdate;
+    const hasValidTemplate = templateUpdate && 
+      typeof templateUpdate === 'object' && 
+      Object.keys(templateUpdate).length > 0;
+    
+    return successResponse(res, { 
+      templateUpdate: hasValidTemplate ? templateUpdate : null 
+    });
   } catch (error) {
     console.error('Error obteniendo template de tienda:', error);
     return errorResponse(res, 'Error obteniendo estilos de tienda', 500);
