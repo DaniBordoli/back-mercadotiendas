@@ -87,6 +87,7 @@ exports.createShop = async (req, res) => {
       shopPhone: shopData.shopPhone,
       primaryColor: shopData.primaryColor || '',
       secondaryColor: shopData.secondaryColor || '',
+      accentColor: shopData.accentColor || '',
       owner: userId,
       // active: true, // Default is true in model
       // imageUrl: null, // Default is null
@@ -194,6 +195,9 @@ exports.updateShop = async (req, res) => {
 
             // Actualizar la tienda
             Object.assign(shop, updates);
+            if (updates.accentColor !== undefined) {
+                shop.accentColor = updates.accentColor;
+            }
             await shop.save();
 
             return successResponse(res, {
@@ -285,9 +289,11 @@ exports.updateShopTemplate = async (req, res) => {
     if (templateUpdate.primaryColor) {
       shopUpdates.primaryColor = templateUpdate.primaryColor;
     }
-    
     if (templateUpdate.secondaryColor) {
       shopUpdates.secondaryColor = templateUpdate.secondaryColor;
+    }
+    if (templateUpdate.accentColor) {
+      shopUpdates.accentColor = templateUpdate.accentColor;
     }
     
     // Aplicar actualizaciones al modelo Shop si hay cambios

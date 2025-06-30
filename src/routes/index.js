@@ -9,6 +9,7 @@ const categoryRoutes = require('./category.routes');
 const paymentRoutes = require('./payment.routes');
 const shopSingleRoutes = require('./shop.routes');
 const shopSocialRoutes = require('./shopsocial.routes');
+const currencyRoutes = require('./currency.routes');
 
 // Rutas de autenticación (/api/auth/*)
 router.use('/auth', authRoutes);
@@ -39,6 +40,9 @@ router.use('/test', testRoutes);
 
 // Rutas de redes sociales de la tienda (/api/shopsocial/*)
 router.use('/shopsocial', shopSocialRoutes);
+
+// Rutas de monedas (/api/currencies/*)
+router.use('/currencies', currencyRoutes);
 
 // Ruta de health check
 router.get('/health', (req, res) => {

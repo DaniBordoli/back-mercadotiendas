@@ -38,7 +38,6 @@ const shopSchema = new mongoose.Schema({
   address: {
     type: String,
     optional: true,
-    unique: true,
   },
   contactEmail: {
     type: String,
@@ -53,6 +52,10 @@ const shopSchema = new mongoose.Schema({
     optional: true
   },
   secondaryColor: {
+    type: String,
+    optional: true
+  },
+  accentColor: {
     type: String,
     optional: true
   },
