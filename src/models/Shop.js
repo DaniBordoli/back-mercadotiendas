@@ -47,18 +47,6 @@ const shopSchema = new mongoose.Schema({
     type: String,
     optional: true
   },
-  primaryColor: {
-    type: String,
-    optional: true
-  },
-  secondaryColor: {
-    type: String,
-    optional: true
-  },
-  accentColor: {
-    type: String,
-    optional: true
-  },
   taxAdress: {
     type: String,
     Optional: true
