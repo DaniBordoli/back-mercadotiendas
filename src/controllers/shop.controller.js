@@ -76,6 +76,16 @@ exports.createShop = async (req, res) => {
         return errorResponse(res, 'Faltan campos requeridos para crear la tienda.', 400);
     }
 
+    // Parse templateUpdate if it's a string
+    let templateUpdate = shopData.templateUpdate;
+    if (typeof templateUpdate === 'string') {
+      try {
+        templateUpdate = JSON.parse(templateUpdate);
+      } catch (e) {
+        templateUpdate = {};
+      }
+    }
+
     const shopModelData = {
       name: shopData.shopName,
       description: shopData.description || '', // Provide default if optional
@@ -85,9 +95,8 @@ exports.createShop = async (req, res) => {
       layoutDesign: shopData.layoutDesign,
       contactEmail: shopData.contactEmail,
       shopPhone: shopData.shopPhone,
-      // Los colores y estilos ahora van solo en templateUpdate
-      templateUpdate: shopData.templateUpdate && Object.keys(shopData.templateUpdate).length > 0 
-        ? shopData.templateUpdate 
+      templateUpdate: templateUpdate && Object.keys(templateUpdate).length > 0 
+        ? templateUpdate 
         : null, // Usar null en lugar de {} para indicar que no hay template configurado
       owner: userId,
       // active: true, // Default is true in model

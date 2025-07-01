@@ -84,4 +84,9 @@ shopSchema.pre('save', function(next) {
   next();
 });
 
+// Add method to check if shop is active
+shopSchema.methods.isActive = function() {
+  return this.active === true;
+};
+
 module.exports = mongoose.model('Shop', shopSchema);
