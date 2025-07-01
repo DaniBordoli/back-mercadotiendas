@@ -85,12 +85,13 @@ exports.createShop = async (req, res) => {
       layoutDesign: shopData.layoutDesign,
       contactEmail: shopData.contactEmail,
       shopPhone: shopData.shopPhone,
-      primaryColor: shopData.primaryColor || '',
-      secondaryColor: shopData.secondaryColor || '',
+      // Los colores y estilos ahora van solo en templateUpdate
+      templateUpdate: shopData.templateUpdate && Object.keys(shopData.templateUpdate).length > 0 
+        ? shopData.templateUpdate 
+        : null, // Usar null en lugar de {} para indicar que no hay template configurado
       owner: userId,
       // active: true, // Default is true in model
       // imageUrl: null, // Default is null
-      // templateConfig: shopData.templateConfig, // Add if saving template details
     };
 
     // Si hay un logo, subirlo a Cloudinary
@@ -99,10 +100,11 @@ exports.createShop = async (req, res) => {
         const logoUrl = await cloudinaryService.uploadImage(req.file.buffer, 'shop-logos');
         shopModelData.imageUrl = logoUrl;
         
-        // También establecer en templateUpdate para el frontend
-        shopModelData.templateUpdate = {
-          logoUrl: logoUrl
-        };
+        // También agregar logoUrl al templateUpdate
+        if (!shopModelData.templateUpdate) {
+          shopModelData.templateUpdate = {};
+        }
+        shopModelData.templateUpdate.logoUrl = logoUrl;
       } catch (uploadError) {
         console.error('Error al subir logo a Cloudinary:', uploadError);
         return errorResponse(res, 'Error al procesar el logo', 500);
@@ -194,6 +196,9 @@ exports.updateShop = async (req, res) => {
 
             // Actualizar la tienda
             Object.assign(shop, updates);
+            if (updates.accentColor !== undefined) {
+                shop.accentColor = updates.accentColor;
+            }
             await shop.save();
 
             return successResponse(res, {
@@ -273,22 +278,28 @@ exports.updateShopTemplate = async (req, res) => {
     
     // Sincronizar ciertas propiedades del template con el modelo Shop
     const shopUpdates = {};
-    if (templateUpdate.title) {
-      shopUpdates.name = templateUpdate.title;
-    }
     
+    // Sincronizar el nombre de la tienda (prioridad a shopName, luego title, luego storeName)
     if (templateUpdate.shopName) {
       shopUpdates.name = templateUpdate.shopName;
+    } else if (templateUpdate.title) {
+      shopUpdates.name = templateUpdate.title;
+    } else if (templateUpdate.storeName) {
+      shopUpdates.name = templateUpdate.storeName;
     }
     
-    // Sincronizar colores con el modelo Shop
-    if (templateUpdate.primaryColor) {
-      shopUpdates.primaryColor = templateUpdate.primaryColor;
+    // Sincronizar la descripción de la tienda
+    if (templateUpdate.storeDescription) {
+      shopUpdates.description = templateUpdate.storeDescription;
     }
     
-    if (templateUpdate.secondaryColor) {
-      shopUpdates.secondaryColor = templateUpdate.secondaryColor;
+    // Sincronizar el slogan
+    if (templateUpdate.storeSlogan) {
+      shopUpdates.slogan = templateUpdate.storeSlogan;
     }
+    
+    // Los colores de estilado ahora se manejan solo en templateUpdate
+    // No sincronizamos más con el modelo Shop
     
     // Aplicar actualizaciones al modelo Shop si hay cambios
     if (Object.keys(shopUpdates).length > 0) {
@@ -389,10 +400,20 @@ exports.getShopTemplate = async (req, res) => {
     const User = require('../models/User');
     const user = await User.findById(userId).populate('shop');
     if (!user || !user.shop) {
-      return res.status(404).json({ message: 'Tienda no encontrada para el usuario' });
+      return errorResponse(res, 'Tienda no encontrada para el usuario', 404);
     }
-    return res.json({ templateUpdate: user.shop.templateUpdate || {} });
+    
+    // Si templateUpdate está vacío o no existe, devolver null para que el frontend use defaults
+    const templateUpdate = user.shop.templateUpdate;
+    const hasValidTemplate = templateUpdate && 
+      typeof templateUpdate === 'object' && 
+      Object.keys(templateUpdate).length > 0;
+    
+    return successResponse(res, { 
+      templateUpdate: hasValidTemplate ? templateUpdate : null 
+    });
   } catch (error) {
-    return res.status(500).json({ message: 'Error obteniendo estilos de tienda', error: error.message });
+    console.error('Error obteniendo template de tienda:', error);
+    return errorResponse(res, 'Error obteniendo estilos de tienda', 500);
   }
 };
