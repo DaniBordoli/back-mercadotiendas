@@ -273,6 +273,11 @@ exports.updateShopTemplate = async (req, res) => {
       templateUpdate.logoUrl = current.logoUrl;
     }
     
+    // Si hay logoUrl en el templateUpdate y no coincide con imageUrl del shop, sincronizar
+    if (templateUpdate.logoUrl && user.shop.imageUrl !== templateUpdate.logoUrl) {
+      user.shop.imageUrl = templateUpdate.logoUrl;
+    }
+    
     const merged = deepMerge({ ...current }, templateUpdate);
     user.shop.templateUpdate = merged;
     
@@ -404,13 +409,26 @@ exports.getShopTemplate = async (req, res) => {
     }
     
     // Si templateUpdate está vacío o no existe, devolver null para que el frontend use defaults
-    const templateUpdate = user.shop.templateUpdate;
+    let templateUpdate = user.shop.templateUpdate;
     const hasValidTemplate = templateUpdate && 
       typeof templateUpdate === 'object' && 
       Object.keys(templateUpdate).length > 0;
     
+    // Si hay un template válido, asegurar que incluya el logo del shop
+    if (hasValidTemplate) {
+      templateUpdate = { ...templateUpdate };
+      
+      // Si el shop tiene imageUrl pero no hay logoUrl en el template, sincronizar
+      if (user.shop.imageUrl && !templateUpdate.logoUrl) {
+        templateUpdate.logoUrl = user.shop.imageUrl;
+      }
+    } else if (user.shop.imageUrl) {
+      // Si no hay template pero sí hay imageUrl, crear un template básico con el logo
+      templateUpdate = { logoUrl: user.shop.imageUrl };
+    }
+    
     return successResponse(res, { 
-      templateUpdate: hasValidTemplate ? templateUpdate : null 
+      templateUpdate: hasValidTemplate || user.shop.imageUrl ? templateUpdate : null 
     });
   } catch (error) {
     console.error('Error obteniendo template de tienda:', error);
