@@ -91,6 +91,21 @@ exports.getProducts = async (req, res) => {
   }
 };
 
+// Nuevo método para obtener solo productos activos de una tienda
+exports.getActiveProducts = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user || !user.shop) {
+      return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
+    }
+    // Solo productos activos
+    const products = await Product.find({ shop: user.shop, estado: 'Activo' }).populate('shop', 'name');
+    return successResponse(res, products, 'Productos activos obtenidos exitosamente');
+  } catch (error) {
+    return errorResponse(res, 'Error al obtener los productos activos', 500, error.message);
+  }
+};
+
 
 exports.getProductById = async (req, res) => {
   try {
@@ -235,11 +250,11 @@ exports.deleteProductImage = async (req, res) => {
     }
 };
 
-// Obtener todos los productos (sin filtrar por tienda)
+// Obtener todos los productos (sin filtrar por tienda) - solo productos activos
 exports.getAllProducts = async (req, res) => {
   try {
-    // Cambiado: populate para traer el nombre de la tienda
-    const products = await Product.find({}).populate('shop', 'name');
+    // Solo obtener productos con estado 'Activo'
+    const products = await Product.find({ estado: 'Activo' }).populate('shop', 'name');
     return successResponse(res, products, 'Todos los productos obtenidos exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al obtener todos los productos', 500, error.message);
