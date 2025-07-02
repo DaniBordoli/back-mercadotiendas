@@ -28,74 +28,8 @@ const handleChat = async (req, res) => {
             }));
             const result = await aiService.getAIChatResponse(formattedMessages, currentTemplate);
             
-            // Si hay actualizaciones del template, aplicarlas automáticamente
-            if (result.templateUpdates && Object.keys(result.templateUpdates).length > 0) {
-                try {
-                    // Importar el controller y función para actualizar el template
-                    const Shop = require('../models/Shop');
-                    
-                    // Función deepMerge local
-                    const deepMerge = (target, source) => {
-                      for (const key in source) {
-                        if (source.hasOwnProperty(key)) {
-                          if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
-                            target[key] = target[key] || {};
-                            target[key] = deepMerge(target[key], source[key]);
-                          } else {
-                            target[key] = source[key];
-                          }
-                        }
-                      }
-                      return target;
-                    };
-                    
-                    // Obtener el template actual
-                    const currentTemplateData = user.shop.templateUpdate || {};
-                    
-                    // Preservar el logoUrl actual si no se está enviando uno nuevo
-                    if (currentTemplateData.logoUrl && !result.templateUpdates.logoUrl) {
-                        result.templateUpdates.logoUrl = currentTemplateData.logoUrl;
-                    }
-                    
-                    // Merge de los cambios
-                    const merged = deepMerge({ ...currentTemplateData }, result.templateUpdates);
-                    user.shop.templateUpdate = merged;
-                    
-                    // Sincronizar ciertas propiedades del template con el modelo Shop
-                    const shopUpdates = {};
-                    
-                    // Sincronizar el nombre de la tienda (prioridad a shopName, luego title, luego storeName)
-                    if (result.templateUpdates.shopName) {
-                        shopUpdates.name = result.templateUpdates.shopName;
-                    } else if (result.templateUpdates.title) {
-                        shopUpdates.name = result.templateUpdates.title;
-                    } else if (result.templateUpdates.storeName) {
-                        shopUpdates.name = result.templateUpdates.storeName;
-                    }
-                    
-                    // Sincronizar la descripción de la tienda
-                    if (result.templateUpdates.storeDescription) {
-                        shopUpdates.description = result.templateUpdates.storeDescription;
-                    }
-                    
-                    // Sincronizar el slogan
-                    if (result.templateUpdates.storeSlogan) {
-                        shopUpdates.slogan = result.templateUpdates.storeSlogan;
-                    }
-                    
-                    // Aplicar actualizaciones al modelo Shop si hay cambios
-                    if (Object.keys(shopUpdates).length > 0) {
-                        console.log('Sincronizando datos del template con Shop (AI):', shopUpdates);
-                        Object.assign(user.shop, shopUpdates);
-                    }
-                    
-                    await user.shop.save();
-                    console.log('Template actualizado automáticamente por IA');
-                } catch (templateError) {
-                    console.error('Error actualizando template automáticamente:', templateError);
-                    // No fallar la respuesta de la IA si hay error en el template
-                }
-            }
+            // NO guardar automáticamente los cambios del template
+            // Los cambios solo se aplicarán cuando el usuario confirme en el frontend
             
             return successResponse(res, {
                 reply: result.reply,
