@@ -71,7 +71,24 @@ exports.createProduct = (req, res) => {
       await product.save();
       return successResponse(res, product, 'Producto creado exitosamente');
     } catch (error) {
-      return errorResponse(res, 'Error al crear el producto', 500, error);
+      console.log('Error al crear producto:', error);
+      
+      // Manejar error de SKU duplicado específicamente
+      if (error.code === 11000) {
+        if (error.keyPattern && error.keyPattern.sku) {
+          return errorResponse(res, 'Ya existe un producto con este SKU. Por favor, usa un SKU diferente.', 400);
+        }
+        // Otros errores de duplicados
+        return errorResponse(res, 'Ya existe un registro con estos datos. Por favor, verifica la información.', 400);
+      }
+      
+      // Errores de validación de Mongoose
+      if (error.name === 'ValidationError') {
+        const validationErrors = Object.values(error.errors).map(err => err.message);
+        return errorResponse(res, `Errores de validación: ${validationErrors.join(', ')}`, 400);
+      }
+      
+      return errorResponse(res, 'Error al crear el producto', 500, error.message);
     }
   });
 };
