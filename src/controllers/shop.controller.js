@@ -162,6 +162,39 @@ exports.getShop = async (req, res) => {
   }
 };
 
+exports.getPublicShop = async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log('Buscando tienda pública con ID:', id);
+    
+    const shop = await Shop.findById(id);
+    console.log('Tienda encontrada:', shop ? 'Sí' : 'No');
+    
+    if (!shop) {
+      console.log('Tienda no encontrada en la base de datos');
+      return errorResponse(res, 'Tienda no encontrada', 404);
+    }
+
+    console.log('Estado de la tienda - active:', shop.active);
+    if (!shop.active) {
+      console.log('Tienda existe pero no está activa');
+      return errorResponse(res, 'Esta tienda no está disponible', 404);
+    }
+
+    // Incluir templateUpdate para obtener los estilos del usuario
+    const shopData = {
+      ...shop.toObject(),
+      templateUpdate: shop.templateUpdate || null
+    };
+
+    console.log('Retornando datos de tienda pública exitosamente');
+    return successResponse(res, { shop: shopData });
+  } catch (err) {
+    console.error('Error al obtener tienda pública:', err);
+    return errorResponse(res, 'Error al obtener tienda', 500);
+  }
+};
+
 exports.updateShop = async (req, res) => {
     // Manejar la carga del archivo
     upload(req, res, async (err) => {

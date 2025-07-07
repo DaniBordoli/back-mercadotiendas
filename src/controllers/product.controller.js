@@ -278,3 +278,23 @@ exports.getAllProducts = async (req, res) => {
     return errorResponse(res, 'Error al obtener todos los productos', 500, error.message);
   }
 };
+
+// Obtener productos de una tienda específica (sin autenticación) - solo productos activos
+exports.getProductsByShop = async (req, res) => {
+  try {
+    const { shopId } = req.params;
+    
+    if (!shopId) {
+      return errorResponse(res, 'ID de tienda requerido', 400);
+    }
+    
+    const products = await Product.find({ 
+      shop: shopId, 
+      estado: 'Activo' 
+    }).populate('shop', 'name');
+    
+    return successResponse(res, products, 'Productos de la tienda obtenidos exitosamente');
+  } catch (error) {
+    return errorResponse(res, 'Error al obtener los productos de la tienda', 500, error.message);
+  }
+};
