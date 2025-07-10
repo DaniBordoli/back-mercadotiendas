@@ -34,7 +34,7 @@ const createCheckout = async (orderData, customerData, items) => {
       description: orderData.description,
       reference: orderData.reference,
       test: process.env.NODE_ENV !== 'production',
-      return_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment/return`,
+      return_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/mobbex-return-bridge.html`,
       // Webhook temporal para desarrollo - Mobbex requiere URL pública válida
       // En desarrollo usamos una URL de prueba o removemos el webhook
       ...(process.env.NODE_ENV === 'production' && process.env.BACKEND_URL && !process.env.BACKEND_URL.includes('localhost') 
@@ -79,10 +79,17 @@ const createCheckout = async (orderData, customerData, items) => {
       throw new Error('Respuesta inválida de Mobbex');
     }
 
+    // Ajustar la estructura de la respuesta para que coincida con la esperada en el controlador
     const result = {
-      id: response.data.id,
-      url: response.data.url,
-      status: response.data.status
+      success: true, // Indicar éxito explícitamente
+      data: {
+        id: response.data.id,
+        url: response.data.url,
+        redirectUrl: response.data.redirectUrl || response.data.url, // Asegurar redirectUrl
+        // Opcional: si Mobbex devuelve un status inicial, se podría incluir aquí
+        // status: response.data.status || 'pending'
+      },
+      message: 'Checkout de Mobbex creado exitosamente'
     };
 
     console.log('=== MOBBEX SERVICE: Resultado final ===');

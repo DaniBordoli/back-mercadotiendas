@@ -65,7 +65,7 @@ exports.createProduct = (req, res) => {
         subcategoria,
         productImages,
         variantes,
-        stock,
+        stock: Number(stock), // Convertir stock a Number
         shop: user.shop 
       });
       await product.save();
@@ -165,6 +165,8 @@ exports.updateProduct = async (req, res) => {
           }
           if (!Array.isArray(value)) value = [];
           updates[field] = value;
+        } else if (field === 'stock') { // Asegurar que el stock se convierta a número
+          updates[field] = Number(req.body[field]);
         } else {
           updates[field] = req.body[field];
         }
@@ -236,6 +238,36 @@ exports.addProductImages = async (req, res) => {
             return errorResponse(res, 'Error al agregar imágenes al producto', 500, error.message);
         }
     });
+};
+
+/**
+ * Actualiza el stock de un producto.
+ * @param {string} productId - ID del producto a actualizar.
+ * @param {number} quantityToReduce - Cantidad a reducir del stock.
+ */
+exports.updateProductStock = async (productId, quantityToReduce) => {
+  try {
+    const product = await Product.findById(productId);
+
+    if (!product) {
+      console.warn(`[Stock Update] Producto no encontrado con ID: ${productId}`);
+      return { success: false, message: 'Producto no encontrado' };
+    }
+
+    if (product.stock < quantityToReduce) {
+      console.warn(`[Stock Update] Stock insuficiente para producto ${productId}. Stock actual: ${product.stock}, intento de reducir: ${quantityToReduce}`);
+      // Opcional: Podríamos lanzar un error aquí si el stock insuficiente es un error crítico
+      return { success: false, message: 'Stock insuficiente' };
+    }
+
+    product.stock -= quantityToReduce;
+    await product.save();
+    console.log(`[Stock Update] Stock de producto ${productId} actualizado. Nuevo stock: ${product.stock}`);
+    return { success: true, newStock: product.stock };
+  } catch (error) {
+    console.error(`[Stock Update] Error al actualizar stock para producto ${productId}:`, error);
+    throw new Error(`Error al actualizar stock: ${error.message}`);
+  }
 };
 
 

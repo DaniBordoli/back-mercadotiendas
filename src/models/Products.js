@@ -24,7 +24,7 @@ const productSchema = new mongoose.Schema({
     type: String
   },
   stock: {
-    type: String
+    type: Number
   },
   categoria: {
     type: String
