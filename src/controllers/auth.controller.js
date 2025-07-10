@@ -3,6 +3,8 @@ const { generateToken } = require('../utils/jwt');
 const { successResponse, errorResponse } = require('../utils/response');
 const crypto = require('crypto');
 const { sendResetPasswordEmail, sendActivationCodeEmail } = require('../services/email.service');
+const jwt = require('jsonwebtoken');
+const { generateAccessToken, generateRefreshToken } = require('../utils/jwt');
 
 
 
@@ -137,10 +139,63 @@ const resendActivationCode = async (req, res) => {
   }
 };
 
+// Nuevo: Login con refresh token
+const login = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email });
+    if (!user) {
+      return errorResponse(res, 'Usuario no encontrado', 404);
+    }
+    const isMatch = await user.matchPassword(password);
+    if (!isMatch) {
+      return errorResponse(res, 'Contraseña incorrecta', 401);
+    }
+    if (!user.isActivated) {
+      return errorResponse(res, 'Cuenta no activada', 403);
+    }
+    const accessToken = generateAccessToken({ id: user._id });
+    const refreshToken = generateRefreshToken({ id: user._id });
+    user.refreshToken = refreshToken;
+    await user.save();
+    const userResponse = { ...user.toJSON() };
+    delete userResponse.password;
+    return successResponse(res, { user: userResponse, accessToken, refreshToken }, 'Login exitoso');
+  } catch (error) {
+    return errorResponse(res, 'Error en login', 500, error.message);
+  }
+};
+
+// Nuevo: Endpoint refresh token
+const refreshToken = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) {
+      return errorResponse(res, 'No refresh token provided', 401);
+    }
+    let payload;
+    try {
+      payload = jwt.verify(refreshToken, require('../config').config.jwtSecret);
+    } catch (err) {
+      return errorResponse(res, 'Refresh token inválido o expirado', 403);
+    }
+    const user = await User.findById(payload.id);
+    if (!user || user.refreshToken !== refreshToken) {
+      return errorResponse(res, 'Refresh token inválido', 403);
+    }
+    const newAccessToken = generateAccessToken({ id: user._id });
+    return successResponse(res, { accessToken: newAccessToken }, 'Token refrescado');
+  } catch (error) {
+    return errorResponse(res, 'Error al refrescar token', 500, error.message);
+  }
+};
+
 module.exports = {
   forgotPassword,
   resetPassword,
   verifyResetToken,
   activateAccount,
-  resendActivationCode
+  resendActivationCode,
+  refreshToken,
+  login // <-- exportar login
 };

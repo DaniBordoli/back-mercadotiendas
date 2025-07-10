@@ -27,6 +27,31 @@ const paymentSchema = new mongoose.Schema({
     required: true
   },
   
+  // Esquema de los ítems comprados
+  items: [{
+    productId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Products',
+      required: true
+    },
+    quantity: {
+      type: Number,
+      required: true,
+      min: 1
+    },
+    unitPrice: { // Precio del producto en el momento de la compra
+      type: Number,
+      required: true
+    },
+    productName: {
+      type: String,
+      required: true
+    },
+    productImage: { // URL de la imagen principal del producto
+      type: String
+    }
+  }],
+  
   // Moneda del pago
   currency: {
     type: String,

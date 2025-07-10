@@ -174,19 +174,6 @@ const validationRules = {
       .notEmpty().withMessage('El código de activación es requerido')
       .isLength({ min: 6, max: 6 }).withMessage('El código debe tener 6 dígitos')
       .isNumeric().withMessage('El código debe contener solo números')
-  ],
-
-  createReview: [
-    body('productId')
-      .trim()
-      .notEmpty().withMessage('El ID del producto es requerido'),
-    body('comment')
-      .trim()
-      .notEmpty().withMessage('El comentario es requerido')
-      .isLength({ min: 5, max: 500 }).withMessage('El comentario debe tener entre 5 y 500 caracteres'),
-    body('rating')
-      .notEmpty().withMessage('La calificación es requerida')
-      .isInt({ min: 1, max: 5 }).withMessage('La calificación debe ser un número entre 1 y 5')
   ]
 };
 

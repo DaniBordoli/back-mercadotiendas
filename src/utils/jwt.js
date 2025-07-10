@@ -5,6 +5,14 @@ const generateToken = (payload) => {
   return jwt.sign(payload, config.jwtSecret, { expiresIn: '1d' });
 };
 
+const generateAccessToken = (payload) => {
+  return jwt.sign(payload, config.jwtSecret, { expiresIn: '15m' });
+};
+
+const generateRefreshToken = (payload) => {
+  return jwt.sign(payload, config.jwtSecret, { expiresIn: '7d' });
+};
+
 const verifyToken = (token) => {
   try {
     return jwt.verify(token, config.jwtSecret);
@@ -15,5 +23,7 @@ const verifyToken = (token) => {
 
 module.exports = {
   generateToken,
-  verifyToken
+  verifyToken,
+  generateAccessToken,
+  generateRefreshToken
 };

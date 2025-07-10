@@ -1,6 +1,7 @@
 const { createCheckout, checkPaymentStatus, processWebhook } = require('../services/mobbex.service');
 const { successResponse, errorResponse } = require('../utils/response');
 const Payment = require('../models/Payment');
+const { updateProductStock } = require('./product.controller'); // Importar la función de stock
 
 /**
  * Crea un checkout para un pedido
@@ -34,26 +35,56 @@ const createOrderCheckout = async (req, res) => {
       return errorResponse(res, 'Se requiere al menos un item en el pedido', 400);
     }
 
-    // Añadir referencia al usuario actual
-    if (req.user && req.user.id) {
-      if (!orderData.reference) {
-        orderData.reference = `user_${req.user.id}_${Date.now()}`;
-      }
-    }
+    const userId = req.user && req.user.id ? req.user.id : null;
+
+    // Preparar ítems para guardar en la base de datos, incluyendo productId del frontend
+    const paymentItems = items.map(item => ({
+      productId: item.productId,
+      quantity: item.quantity,
+      unitPrice: item.price,
+      productName: item.name,
+      productImage: item.image
+    }));
+
+    // Generar una referencia única para el pedido que se enviará a Mobbex
+    orderData.reference = `order_${Date.now()}`;
 
     // Crear checkout en Mobbex
+    console.log('=== BACKEND: Ítems enviados a Mobbex service desde controller ===', JSON.stringify(items, null, 2));
     console.log('=== BACKEND: Llamando al servicio de Mobbex ===');
-    const checkoutData = await createCheckout(orderData, customerData, items);
+    const checkoutResponse = await createCheckout(orderData, customerData, items);
 
     console.log('=== BACKEND: Respuesta del servicio Mobbex ===');
-    console.log('checkoutData:', JSON.stringify(checkoutData, null, 2));
+    console.log('checkoutResponse:', JSON.stringify(checkoutResponse, null, 2));
 
-    return successResponse(res, checkoutData, 'Checkout creado exitosamente');
+    // Si el checkout con Mobbex fue exitoso, crear y guardar el registro de pago en nuestra DB
+    if (checkoutResponse.success && checkoutResponse.data.id) {
+      const newPayment = new Payment({
+        user: userId,
+        mobbexId: checkoutResponse.data.id,
+        reference: orderData.reference, // La referencia que enviamos a Mobbex
+        amount: orderData.total,
+        currency: orderData.currency || 'ARS',
+        // Se asegura que el código de estado inicial siempre esté presente.
+        status: { code: '1', text: 'Mobbex Checkout Creado' }, // Usar estado de Mobbex
+        paymentMethod: null, // Mobbex no suele devolver el método de pago aquí, se actualiza con webhook
+        paymentData: checkoutResponse.data, // Guardar los datos completos de Mobbex checkout
+        items: paymentItems // Los ítems preparados
+      });
+      await newPayment.save();
+      console.log('=== BACKEND: Registro de pago creado exitosamente en DB local con MobbexId:', newPayment._id, '===');
+    } else {
+      console.error('=== BACKEND: Error al obtener ID de Mobbex para el checkout ===');
+      throw new Error('Error al crear el checkout de pago con Mobbex.');
+    }
+
+    return successResponse(res, checkoutResponse, 'Checkout creado exitosamente');
   } catch (error) {
     console.error('=== BACKEND: Error en createOrderCheckout ===');
     console.error('Error completo:', error);
     console.error('Stack trace:', error.stack);
     
+    // Cambiado: Pasar el mensaje de error original para depuración
     return errorResponse(res, 'Error al crear el checkout', 500, error.message);
   }
 };
@@ -94,63 +125,48 @@ const getPaymentStatus = async (req, res) => {
  */
 const handleWebhook = async (req, res) => {
   try {
+    console.log('=== WEBHOOK RECIBIDO: req.body completo ===', JSON.stringify(req.body, null, 2));
     const webhookData = req.body;
 
     // Procesar el webhook
     const paymentInfo = processWebhook(webhookData);
     
-    // Verificar si ya existe este pago en nuestra base de datos
-    let payment = await Payment.findOne({ mobbexId: paymentInfo.id });
+    // Verificar si ya existe este pago en nuestra base de datos por su mobbexId
+    // O buscarlo por la referencia (nuestro ID de pago) si es un nuevo webhook para un pago que ya iniciamos
+    let payment = await Payment.findOne({
+      $or: [
+        { mobbexId: paymentInfo.id },
+        { reference: paymentInfo.reference } // Buscar por nuestra referencia de pago
+      ]
+    });
     
     if (payment) {
       // Actualizar el pago existente
       payment.status = paymentInfo.status;
       payment.paymentMethod = paymentInfo.paymentMethod;
+      payment.paymentData = webhookData.data; // Actualizar con los datos completos del webhook
       payment.updatedAt = new Date();
       
       await payment.save();
-      console.log('Pago actualizado:', payment._id);
+      console.log('=== BACKEND: Pago actualizado por webhook:', payment._id, '===');
+      console.log('=== BACKEND: Estado del pago en webhook:', paymentInfo.status.code, '==='); // Nuevo log
+
+      // Si el pago es aprobado, actualizar el stock de los productos
+      if (paymentInfo.status.code === '2' || paymentInfo.status.code === '200') {
+        console.log('=== BACKEND: Pago aprobado. Actualizando stock de productos... ===');
+        for (const item of payment.items) {
+          console.log(`=== BACKEND: Item para actualizar stock - Product ID: ${item.productId}, Quantity: ${item.quantity} ===`); // Nuevo log
+          await updateProductStock(item.productId, item.quantity);
+        }
+      } else if (paymentInfo.status.code === '3' || paymentInfo.status.code === '4' || paymentInfo.status.code === '400') {
+        console.log('=== BACKEND: Pago rechazado/cancelado. No se actualiza el stock. ===');
+      }
+
     } else {
-      // Extraer el ID de usuario de la referencia o de los datos del cliente
-      // Esto dependerá de cómo estés estructurando tus referencias
-      // Por ejemplo, si la referencia tiene formato "user_123_order_456"
-      let userId;
-      
-      if (paymentInfo.reference && paymentInfo.reference.includes('_')) {
-        const parts = paymentInfo.reference.split('_');
-        if (parts.length >= 2) {
-          userId = parts[1]; // Asumiendo formato "user_123_..."
-        }
-      }
-      
-      // Si no se pudo extraer el ID de la referencia, podríamos buscarlo por email
-      if (!userId && paymentInfo.customer && paymentInfo.customer.email) {
-        const User = require('../models/User');
-        const user = await User.findOne({ email: paymentInfo.customer.email });
-        if (user) {
-          userId = user._id;
-        }
-      }
-      
-      // Crear un nuevo registro de pago
-      if (userId) {
-        payment = new Payment({
-          user: userId,
-          mobbexId: paymentInfo.id,
-          reference: paymentInfo.reference,
-          amount: paymentInfo.amount,
-          currency: paymentInfo.currency,
-          status: paymentInfo.status,
-          paymentMethod: paymentInfo.paymentMethod,
-          paymentData: webhookData.data,
-          createdAt: paymentInfo.createdAt
-        });
-        
-        await payment.save();
-        console.log('Nuevo pago registrado:', payment._id);
-      } else {
-        console.warn('No se pudo identificar el usuario para el pago:', paymentInfo.id);
-      }
+      // Si no encontramos un pago existente (caso raro, debería existir uno creado en createOrderCheckout)
+      console.warn('=== BACKEND: Webhook recibido para un pago no encontrado en la DB local (mobbexId/reference):', paymentInfo.id, paymentInfo.reference, '===');
+      // Opcional: Podríamos crear un nuevo registro de pago aquí, pero es preferible que ya exista.
+      // Por ahora, solo logueamos la advertencia y respondemos 200.
     }
 
     // Siempre responder con éxito al webhook para que Mobbex no reintente
