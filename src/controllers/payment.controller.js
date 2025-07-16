@@ -1,7 +1,10 @@
 const { createCheckout, checkPaymentStatus, processWebhook } = require('../services/mobbex.service');
 const { successResponse, errorResponse } = require('../utils/response');
 const Payment = require('../models/Payment');
+const Shop = require('../models/Shop');
 const { updateProductStock } = require('./product.controller'); // Importar la función de stock
+const axios = require('axios');
+const mobbexConfig = require('../config/mobbex');
 
 /**
  * Crea un checkout para un pedido
@@ -37,6 +40,16 @@ const createOrderCheckout = async (req, res) => {
 
     const userId = req.user && req.user.id ? req.user.id : null;
 
+    // Obtener la tienda del usuario autenticado
+    const userShop = req.user && req.user.shop ? req.user.shop : null;
+    let shop = null;
+    if (userShop) {
+      shop = await Shop.findById(userShop);
+    }
+    if (!shop) {
+      return errorResponse(res, 'No se encontró la tienda asociada al usuario', 400);
+    }
+
     // Preparar ítems para guardar en la base de datos, incluyendo productId del frontend
     const paymentItems = items.map(item => ({
       productId: item.productId,
@@ -49,10 +62,13 @@ const createOrderCheckout = async (req, res) => {
     // Generar una referencia única para el pedido que se enviará a Mobbex
     orderData.reference = `order_${Date.now()}`;
 
-    // Crear checkout en Mobbex
+    // Crear checkout en Mobbex usando credenciales de la tienda
     console.log('=== BACKEND: Ítems enviados a Mobbex service desde controller ===', JSON.stringify(items, null, 2));
     console.log('=== BACKEND: Llamando al servicio de Mobbex ===');
-    const checkoutResponse = await createCheckout(orderData, customerData, items);
+    const checkoutResponse = await createCheckout(orderData, customerData, items, {
+      mobbexApiKey: shop.mobbexApiKey,
+      mobbexAccessToken: shop.mobbexAccessToken
+    });
 
     console.log('=== BACKEND: Respuesta del servicio Mobbex ===');
     console.log('checkoutResponse:', JSON.stringify(checkoutResponse, null, 2));
@@ -197,9 +213,60 @@ const getUserPayments = async (req, res) => {
   }
 };
 
+// Iniciar Dev Connect de Mobbex y obtener URL de conexión
+const getMobbexConnectUrl = async (req, res) => {
+  try {
+    const returnUrl = req.body.returnUrl;
+    if (!returnUrl) {
+      return errorResponse(res, 'Falta returnUrl', 400);
+    }
+    const response = await axios.post('https://api.mobbex.com/p/developer/connect', {
+      return_url: returnUrl
+    }, {
+      headers: {
+        'x-api-key': mobbexConfig.apiKey,
+        'Content-Type': 'application/json'
+      }
+    });
+    if (response.data && response.data.result && response.data.data && response.data.data.url) {
+      return successResponse(res, { connectUrl: response.data.data.url, connectId: response.data.data.id });
+    } else {
+      return errorResponse(res, 'No se pudo obtener la URL de conexión de Mobbex', 500);
+    }
+  } catch (err) {
+    console.error('Error al obtener URL de conexión de Mobbex:', err);
+    return errorResponse(res, 'Error al obtener URL de conexión de Mobbex', 500);
+  }
+};
+
+// Obtener credenciales de Mobbex usando Connect_ID
+const getMobbexCredentials = async (req, res) => {
+  try {
+    const { connectId } = req.query;
+    if (!connectId) {
+      return errorResponse(res, 'Falta connectId', 400);
+    }
+    const response = await axios.get(`https://api.mobbex.com/p/developer/connect/credentials?Connect_ID=${connectId}`, {
+      headers: {
+        'x-api-key': mobbexConfig.apiKey
+      }
+    });
+    if (response.data && response.data.result && response.data.data) {
+      return successResponse(res, response.data.data);
+    } else {
+      return errorResponse(res, 'No se pudieron obtener las credenciales de Mobbex', 500);
+    }
+  } catch (err) {
+    console.error('Error al obtener credenciales de Mobbex:', err);
+    return errorResponse(res, 'Error al obtener credenciales de Mobbex', 500);
+  }
+};
+
 module.exports = {
   createOrderCheckout,
   getPaymentStatus,
   handleWebhook,
-  getUserPayments
+  getUserPayments,
+  getMobbexConnectUrl,
+  getMobbexCredentials
 };

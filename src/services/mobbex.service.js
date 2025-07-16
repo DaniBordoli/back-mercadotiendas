@@ -18,14 +18,30 @@ mobbex.configurations.configure({
  * @param {Object} orderData - Datos del pedido (total, descripción, referencia)
  * @param {Object} customerData - Datos del cliente (email, nombre, identificación)
  * @param {Array} items - Items del pedido
+ * @param {Object} credentials - Credenciales de Mobbex (opcional)
  * @returns {Promise<Object>} - Datos del checkout creado
  */
-const createCheckout = async (orderData, customerData, items) => {
+const createCheckout = async (orderData, customerData, items, credentials = {}) => {
   try {
     console.log('=== MOBBEX SERVICE: Iniciando createCheckout ===');
     console.log('orderData recibido:', JSON.stringify(orderData, null, 2));
     console.log('customerData recibido:', JSON.stringify(customerData, null, 2));
     console.log('items recibidos:', JSON.stringify(items, null, 2));
+
+    // Configurar el SDK de Mobbex con las credenciales de la tienda si se proporcionan
+    if (credentials.mobbexApiKey && credentials.mobbexAccessToken) {
+      mobbex.configurations.configure({
+        apiKey: credentials.mobbexApiKey,
+        accessToken: credentials.mobbexAccessToken,
+        auditKey: mobbexConfig.auditKey
+      });
+    } else {
+      mobbex.configurations.configure({
+        apiKey: mobbexConfig.apiKey,
+        accessToken: mobbexConfig.accessToken,
+        auditKey: mobbexConfig.auditKey
+      });
+    }
 
     // Preparar datos para Mobbex
     const checkoutData = {

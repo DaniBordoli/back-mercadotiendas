@@ -155,7 +155,7 @@ exports.getShop = async (req, res) => {
       return errorResponse(res, 'Tienda no encontrada', 404);
     }
 
-    return successResponse(res, shop);
+    return successResponse(res, { shop });
   } catch (err) {
     console.error('Error al obtener tienda:', err);
     return errorResponse(res, 'Error al obtener tienda', 500);
@@ -475,5 +475,36 @@ exports.getShopTemplate = async (req, res) => {
   } catch (error) {
     console.error('Error obteniendo template de tienda:', error);
     return errorResponse(res, 'Error obteniendo estilos de tienda', 500);
+  }
+};
+
+// Actualizar credenciales de Mobbex para una tienda
+exports.updateMobbexCredentials = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { mobbexApiKey, mobbexAccessToken } = req.body;
+
+    if (!mobbexApiKey || !mobbexAccessToken) {
+      return errorResponse(res, 'Faltan credenciales de Mobbex', 400);
+    }
+
+    const shop = await Shop.findById(id);
+    if (!shop) {
+      return errorResponse(res, 'Tienda no encontrada', 404);
+    }
+
+    // Solo el dueño puede actualizar sus credenciales
+    if (shop.owner.toString() !== req.user.id) {
+      return errorResponse(res, 'No autorizado para modificar esta tienda', 403);
+    }
+
+    shop.mobbexApiKey = mobbexApiKey;
+    shop.mobbexAccessToken = mobbexAccessToken;
+    await shop.save();
+
+    return successResponse(res, { message: 'Credenciales de Mobbex actualizadas correctamente' });
+  } catch (err) {
+    console.error('Error al actualizar credenciales de Mobbex:', err);
+    return errorResponse(res, 'Error interno al actualizar credenciales de Mobbex', 500);
   }
 };

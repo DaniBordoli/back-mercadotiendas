@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { createShop, getShop, updateShop, deleteShop, updateShopTemplate, getShopTemplate, getMyShop, updateShopLogo, getPublicShop } = require('../controllers/shop.controller');
+const { createShop, getShop, updateShop, deleteShop, updateShopTemplate, getShopTemplate, getMyShop, updateShopLogo, getPublicShop, updateMobbexCredentials } = require('../controllers/shop.controller');
 const { verifyToken } = require('../middlewares/auth');
 
 // Ruta pública para obtener tienda por ID (sin autenticación)
@@ -30,5 +30,8 @@ router.put('/:id', updateShop);
 
 // Eliminar tienda
 router.delete('/:id', deleteShop);
+
+// Actualizar credenciales de Mobbex para una tienda
+router.put('/:id/mobbex-credentials', updateMobbexCredentials);
 
 module.exports = router;

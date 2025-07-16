@@ -75,6 +75,15 @@ const shopSchema = new mongoose.Schema({
     required: true,
     unique: true,
     trim: true
+  },
+  // Credenciales de Mobbex por tienda
+  mobbexApiKey: {
+    type: String,
+    default: null
+  },
+  mobbexAccessToken: {
+    type: String,
+    default: null
   }
 });
 
