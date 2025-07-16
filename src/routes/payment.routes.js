@@ -5,7 +5,9 @@ const {
   createOrderCheckout,
   getPaymentStatus,
   handleWebhook,
-  getUserPayments
+  getUserPayments,
+  getMobbexConnectUrl,
+  getMobbexCredentials
 } = require('../controllers/payment.controller');
 
 /**
@@ -28,6 +30,20 @@ router.get('/status/:id', verifyToken, getPaymentStatus);
  * @access Private
  */
 router.get('/history', verifyToken, getUserPayments);
+
+/**
+ * @route POST /api/payments/mobbex-connect-url
+ * @desc Obtener URL de conexión Dev Connect de Mobbex
+ * @access Private
+ */
+router.post('/mobbex-connect-url', verifyToken, getMobbexConnectUrl);
+
+/**
+ * @route GET /api/payments/mobbex-credentials
+ * @desc Obtener credenciales de Mobbex usando Connect_ID
+ * @access Private
+ */
+router.get('/mobbex-credentials', verifyToken, getMobbexCredentials);
 
 /**
  * @route POST /api/payments/webhook
