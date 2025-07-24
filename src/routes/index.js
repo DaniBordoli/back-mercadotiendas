@@ -11,6 +11,10 @@ const shopSingleRoutes = require('./shop.routes');
 const shopSocialRoutes = require('./shopsocial.routes');
 const currencyRoutes = require('./currency.routes');
 const shopInstitutionalRoutes = require('./shopInstitutional.routes');
+const campaignRoutes = require('./campaign.routes');
+const campaignApplicationRoutes = require('./campaignApplication.routes');
+const uploadRoutes = require('./upload.routes');
+const influencerRoutes = require('./influencer');
 
 // Rutas de autenticación (/api/auth/*)
 router.use('/auth', authRoutes);
@@ -47,6 +51,18 @@ router.use('/currencies', currencyRoutes);
 
 // Rutas de información institucional (/api/shop-institutional/*)
 router.use('/shop-institutional', shopInstitutionalRoutes);
+
+// Rutas de campañas (/api/campaigns/*)
+router.use('/campaigns', campaignRoutes);
+
+// Rutas de aplicaciones a campañas (/api/applications/*)
+router.use('/applications', campaignApplicationRoutes);
+
+// Rutas de carga de archivos (/api/uploads/*)
+router.use('/uploads', uploadRoutes);
+
+// Rutas de influencer (/api/users/* y /api/admin/influencer/*)
+router.use('/', influencerRoutes);
 
 // Ruta de health check
 router.get('/health', (req, res) => {
