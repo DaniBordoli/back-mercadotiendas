@@ -5,6 +5,7 @@ const { config } = require('./config');
 const connectDB = require('./config/database');
 const routes = require('./routes');
 const { errorHandler, notFound } = require('./middlewares/error');
+const { setupStaticMiddleware } = require('./middlewares/static.middleware');
 
 const app = express();
 
@@ -21,6 +22,9 @@ app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+// Configurar middleware para archivos estáticos
+setupStaticMiddleware(app);
 
 // Routes
 app.use('/api', routes);

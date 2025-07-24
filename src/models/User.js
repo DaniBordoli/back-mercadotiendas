@@ -86,6 +86,10 @@ const userSchema = new mongoose.Schema({
   refreshToken: {
     type: String,
     default: null
+  },
+  isInfluencer: {
+    type: Boolean,
+    default: false
   }
 });
 
