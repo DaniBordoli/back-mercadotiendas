@@ -26,4 +26,5 @@ const productReviewSchema = new mongoose.Schema({
 
 const ProductReview = mongoose.model('ProductReview', productReviewSchema);
 
+
 module.exports = ProductReview;

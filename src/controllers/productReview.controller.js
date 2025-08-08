@@ -2,6 +2,7 @@ const { ProductReview } = require('../models');
 const { successResponse, errorResponse } = require('../utils/response');
 
 // Crear una nueva reseña
+
 const createReview = async (req, res) => {
   try {
     const { productId, comment, rating } = req.body;

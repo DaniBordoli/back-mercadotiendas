@@ -13,4 +13,5 @@ router.get('/product/:productId', getProductReviews);
 // Eliminar una reseña (requiere autenticación y ser el autor)
 router.delete('/:reviewId', verifyToken, deleteReview);
 
+
 module.exports = router;
