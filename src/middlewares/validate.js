@@ -30,6 +30,7 @@ const validationRules = {
       })
   ],
   
+  
   // Validación para crear checkout de Mobbex
   createCheckout: [
     // Validación de datos del pedido
