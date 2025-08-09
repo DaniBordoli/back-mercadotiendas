@@ -24,7 +24,7 @@ const createReview = async (req, res) => {
       userName: review.userId?.fullName || review.userId?.name || 'Usuario Anónimo'
     };
 
-    successResponse(res, 'Reseña creada exitosamente', reviewResponse, 201);
+    successResponse(res, reviewResponse, 'Reseña creada exitosamente', 201);
   } catch (error) {
     console.error('Error creating review:', error);
     errorResponse(res, 'Error al crear la reseña', 500);
@@ -47,7 +47,7 @@ const getProductReviews = async (req, res) => {
       userName: review.userId?.fullName || review.userId?.name || 'Usuario Anónimo'
     }));
 
-    successResponse(res, 'Reseñas obtenidas exitosamente', reviewsWithUserName);
+    successResponse(res, reviewsWithUserName, 'Reseñas obtenidas exitosamente');
   } catch (error) {
     console.error('Error getting reviews:', error);
     errorResponse(res, 'Error al obtener las reseñas', 500);
@@ -68,7 +68,7 @@ const deleteReview = async (req, res) => {
 
     await ProductReview.findByIdAndDelete(reviewId);
 
-    successResponse(res, 'Reseña eliminada exitosamente');
+    successResponse(res, null, 'Reseña eliminada exitosamente');
   } catch (error) {
     console.error('Error deleting review:', error);
     errorResponse(res, 'Error al eliminar la reseña', 500);
