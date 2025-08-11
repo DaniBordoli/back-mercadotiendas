@@ -96,12 +96,7 @@ exports.createProduct = (req, res) => {
 
 exports.getProducts = async (req, res) => {
   try {
-    const user = req.user;
-    if (!user || !user.shop) {
-      return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
-    }
-    // Cambiado: populate para traer el nombre de la tienda
-    const products = await Product.find({ shop: user.shop }).populate('shop', 'name');
+    const products = await Product.find({ estado: 'Activo' }).populate('shop', 'name');
     return successResponse(res, products, 'Productos obtenidos exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al obtener los productos', 500, error.message);
@@ -111,14 +106,7 @@ exports.getProducts = async (req, res) => {
 // Nuevo método para obtener solo productos activos de una tienda
 exports.getActiveProducts = async (req, res) => {
   try {
-    const user = req.user;
-    if (!user || !user.shop) {
-      return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
-    }
-    const products = await Product.find({ 
-      shop: user.shop, 
-      estado: 'Activo'
-    }).populate('shop', 'name');
+    const products = await Product.find({ estado: 'Activo' }).populate('shop', 'name');
     return successResponse(res, products, 'Productos activos obtenidos exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al obtener los productos activos', 500, error.message);
@@ -129,12 +117,7 @@ exports.getActiveProducts = async (req, res) => {
 exports.getProductById = async (req, res) => {
   try {
     const { id } = req.params;
-    const user = req.user;
-    if (!user || !user.shop) {
-      return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
-    }
-    // Cambiado: populate para traer el nombre de la tienda
-    const product = await Product.findOne({ _id: id, shop: user.shop }).populate('shop', 'name');
+    const product = await Product.findById(id).populate('shop', 'name');
     if (!product) {
       return errorResponse(res, 'Producto no encontrado', 404);
     }
