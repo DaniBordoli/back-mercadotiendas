@@ -90,6 +90,11 @@ const userSchema = new mongoose.Schema({
   isInfluencer: {
     type: Boolean,
     default: false
+  },
+  userType: {
+    type: [String],
+    enum: ['buyer', 'seller', 'influencer'],
+    default: ['buyer']
   }
 });
 
