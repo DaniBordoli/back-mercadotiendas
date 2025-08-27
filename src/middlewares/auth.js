@@ -32,6 +32,8 @@ const verifyTokenMiddleware = async (req, res, next) => {
 
     // Agregar usuario al request
     req.user = user;
+    // MT-30: Validar roles de usuario para login con roles
+    req.userRole = user.role || 'user';
     next();
   } catch (error) {
     return errorResponse(res, 'Authentication failed', 500, error.message);
