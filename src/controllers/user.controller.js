@@ -21,7 +21,7 @@ const getProfile = async (req, res) => {
   try {
     // Seleccionamos los campos específicos que queremos devolver
     const user = await User.findById(req.user.id)
-      .select('name email birthDate city province country role userPhone shop avatar userType isInfluencer')
+      .select('name email birthDate city province country role userPhone shop avatar userType isInfluencer preferredAddress')
       .populate('shop');
     if (!user) {
       return errorResponse(res, 'Usuario no encontrado', 404);
@@ -77,7 +77,7 @@ const updateAvatar = async (req, res) => {
 
 const updateProfile = async (req, res) => {
   try {
-    const { name, email, birthDate, city, province, country, userPhone, userType } = req.body;
+    const { name, email, birthDate, city, province, country, userPhone, userType, preferredAddress } = req.body;
 
     // Verificar si el nuevo email ya está en uso
     if (email) {
@@ -100,6 +100,7 @@ const updateProfile = async (req, res) => {
     if (province) user.province = province;
     if (country) user.country = country;
     if (userPhone) user.userPhone = userPhone;
+    if (preferredAddress) user.preferredAddress = preferredAddress;
     if (userType && Array.isArray(userType)) {
       // Validar que todos los tipos sean válidos
       const validTypes = ['buyer', 'seller', 'influencer'];

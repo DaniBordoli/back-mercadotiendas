@@ -64,6 +64,11 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: false
   },
+  // Dirección preferida opcional del comprador
+  preferredAddress: {
+    type: Object, // Contendrá country, province, city, postalCode, streetAndNumber, role
+    default: null
+  },
   role: {
     type: String,
     enum: ['admin', 'user'],
