@@ -1,4 +1,5 @@
 const Category = require('../models/Category');
+const mongoose = require('mongoose');
 const { successResponse, errorResponse } = require('../utils/response');
 
 // Crear una nueva categoría
@@ -60,6 +61,28 @@ exports.getCategoryById = async (req, res) => {
     return successResponse(res, category, 'Categoría obtenida exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al obtener la categoría', 500, error.message);
+  }
+};
+
+// Obtener subcategorías por categoría padre
+exports.getSubcategoriesByParent = async (req, res) => {
+  try {
+    const { parentId } = req.params;
+
+    if (!parentId) {
+      return errorResponse(res, 'ID de categoría padre requerido', 400);
+    }
+
+        // Buscar subcategorías tanto si el campo parent se almacenó como ObjectId como si se almacenó como string
+    const subcategories = await Category.find({
+      $or: [
+        { parent: parentId }, // Coincidencia con string
+        { parent: mongoose.Types.ObjectId.isValid(parentId) ? mongoose.Types.ObjectId(parentId) : undefined }, // Coincidencia con ObjectId
+      ],
+    }).lean();
+    return successResponse(res, subcategories, 'Subcategorías obtenidas exitosamente');
+  } catch (error) {
+    return errorResponse(res, 'Error al obtener subcategorías', 500, error.message);
   }
 };
 
