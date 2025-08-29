@@ -6,6 +6,7 @@ const shopRoutes = require('./shop.routes');
 const aiRoutes = require('./ai.routes');
 const productsRoutes = require('./products.routes');
 const categoryRoutes = require('./category.routes');
+const subcategoryRoutes = require('./subcategory.routes');
 const paymentRoutes = require('./payment.routes');
 const shopSingleRoutes = require('./shop.routes');
 const shopSocialRoutes = require('./shopsocial.routes');
@@ -36,6 +37,9 @@ router.use('/products', productsRoutes);
 
 // Rutas de categorías (/api/categories/*)
 router.use('/categories', categoryRoutes);
+
+// Rutas de subcategorías (/api/subcategories/*)
+router.use('/subcategories', subcategoryRoutes);
 
 // Rutas de pagos (/api/payments/*)
 router.use('/payments', paymentRoutes);
