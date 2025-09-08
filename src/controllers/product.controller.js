@@ -94,6 +94,7 @@ exports.createProduct = (req, res) => {
 };
 
 
+// Obtener todos los productos activos
 exports.getProducts = async (req, res) => {
   try {
     const products = await Product.find({ estado: 'Activo' }).populate('shop', 'name');
@@ -103,13 +104,32 @@ exports.getProducts = async (req, res) => {
   }
 };
 
-// Nuevo método para obtener solo productos activos de una tienda
+// Obtener solo productos activos
 exports.getActiveProducts = async (req, res) => {
   try {
     const products = await Product.find({ estado: 'Activo' }).populate('shop', 'name');
     return successResponse(res, products, 'Productos activos obtenidos exitosamente');
   } catch (error) {
-    return errorResponse(res, 'Error al obtener los productos activos', 500, error.message);
+    return errorResponse(res, 'Error al obtener productos activos', 500);
+  }
+};
+
+// Obtener productos de la tienda del usuario autenticado (para gestión)
+exports.getMyProducts = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user || !user.shop) {
+      return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
+    }
+    
+    const products = await Product.find({ 
+      shop: user.shop, 
+      estado: 'Activo' 
+    }).populate('shop', 'name');
+    
+    return successResponse(res, products, 'Productos de la tienda obtenidos exitosamente');
+  } catch (error) {
+    return errorResponse(res, 'Error al obtener productos de la tienda', 500);
   }
 };
 
@@ -136,7 +156,7 @@ exports.updateProduct = async (req, res) => {
       return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
     }
     // Solo permitir los campos editables
-    const allowedFields = ['nombre', 'sku', 'descripcion', 'precio', 'stock', 'categoria', 'estado', 'productImages', 'variantes'];
+    const allowedFields = ['nombre', 'sku', 'descripcion', 'precio', 'stock', 'categoria', 'subcategoria', 'estado', 'productImages', 'variantes'];
     const updates = {};
     allowedFields.forEach(field => {
       if (req.body[field] !== undefined) {

@@ -1,13 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('../middlewares/auth');
-const { createProduct, updateProduct, deleteProduct, getProducts, getProductById, addProductImages, deleteProductImage, getAllProducts, getActiveProducts, getProductsByShop } = require('../controllers/product.controller');
+const { createProduct, updateProduct, deleteProduct, getProducts, getProductById, addProductImages, deleteProductImage, getAllProducts, getActiveProducts, getProductsByShop, getMyProducts } = require('../controllers/product.controller');
 
-// Obtener productos (todos para admin)
+// Obtener productos
 router.get('/', getProducts);
 
 // Obtener solo productos activos
 router.get('/active', getActiveProducts);
+
+// Obtener productos de la tienda del usuario autenticado (para gestión)
+router.get('/my-products', verifyToken, getMyProducts);
 
 // Obtener todos los productos de todas las tiendas (sin autenticación)
 router.get('/all', getAllProducts);

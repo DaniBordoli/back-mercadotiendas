@@ -508,3 +508,29 @@ exports.updateMobbexCredentials = async (req, res) => {
     return errorResponse(res, 'Error interno al actualizar credenciales de Mobbex', 500);
   }
 };
+
+// Verificar disponibilidad del nombre de la tienda
+exports.checkShopNameAvailability = async (req, res) => {
+  try {
+    const { name } = req.query;
+    
+    if (!name || name.trim().length === 0) {
+      return errorResponse(res, 'El nombre de la tienda es requerido', 400);
+    }
+    
+    // Buscar si ya existe una tienda con ese nombre (case insensitive)
+    const existingShop = await Shop.findOne({ 
+      name: { $regex: new RegExp(`^${name.trim()}$`, 'i') } 
+    });
+    
+    const isAvailable = !existingShop;
+    
+    return successResponse(res, { 
+      available: isAvailable,
+      name: name.trim()
+    });
+  } catch (err) {
+    console.error('Error al verificar disponibilidad del nombre:', err);
+    return errorResponse(res, 'Error interno al verificar disponibilidad', 500);
+  }
+};
