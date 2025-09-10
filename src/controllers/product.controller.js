@@ -14,7 +14,10 @@ const uploadProductImages = multer({
         }
         cb(null, true);
     }
-}).array('productImages', 10); // hasta 10 imágenes por vez
+}).fields([
+    { name: 'productImages', maxCount: 10 },
+    { name: 'variantImages', maxCount: 20 }
+]); // hasta 10 imágenes de producto y 20 de variantes
 
 // Crear producto con imágenes
 exports.createProduct = (req, res) => {
@@ -26,7 +29,7 @@ exports.createProduct = (req, res) => {
     }
 
     try {
-      const { nombre, descripcion, sku, estado, precio, categoria, stock, subcategoria } = req.body;
+      const { nombre, descripcion, sku, estado, precio, categoria, stock, subcategoria, codigoBarras, tieneVariantes } = req.body;
       
       // Procesar variantes
       let variantes = req.body.variantes;
@@ -39,14 +42,51 @@ exports.createProduct = (req, res) => {
       }
       if (!Array.isArray(variantes)) variantes = [];
 
+      // Procesar combinaciones de variantes
+      let combinacionesVariantes = req.body.combinacionesVariantes;
+      if (typeof combinacionesVariantes === 'string') {
+        try { 
+          combinacionesVariantes = JSON.parse(combinacionesVariantes); 
+        } catch { 
+          combinacionesVariantes = []; 
+        }
+      }
+      if (!Array.isArray(combinacionesVariantes)) combinacionesVariantes = [];
+
       console.log('[createProduct] req.files:', req.files); // <-- Depuración
+      
+      // Subir imágenes principales a Cloudinary si existen
       let productImages = [];
-      if (req.files && req.files.length > 0) {
-        for (const file of req.files) {
+      if (req.files && req.files.productImages && req.files.productImages.length > 0) {
+        for (const file of req.files.productImages) {
           const imageUrl = await cloudinaryService.uploadImage(file.buffer, 'products');
           productImages.push(imageUrl);
         }
       }
+      
+      // Procesar imágenes de variantes si existen
+      let variantImageUrls = [];
+      if (req.files && req.files.variantImages && req.files.variantImages.length > 0) {
+        for (const file of req.files.variantImages) {
+          const imageUrl = await cloudinaryService.uploadImage(file.buffer, 'products/variants');
+          variantImageUrls.push(imageUrl);
+        }
+      }
+      
+      // Actualizar las URLs de imágenes en las combinaciones de variantes
+      if (combinacionesVariantes && combinacionesVariantes.length > 0 && variantImageUrls.length > 0) {
+        const variantImageIndexes = req.body.variantImageIndex;
+        const indexes = Array.isArray(variantImageIndexes) ? variantImageIndexes : [variantImageIndexes];
+        
+        let imageIndex = 0;
+        combinacionesVariantes.forEach((combo, index) => {
+          if (indexes.includes(String(index)) && imageIndex < variantImageUrls.length) {
+            combo.image = variantImageUrls[imageIndex];
+            imageIndex++;
+          }
+        });
+      }
+      
       console.log('[createProduct] productImages:', productImages); // <-- Depuración
 
       // Obtener la tienda del usuario autenticado
@@ -65,7 +105,10 @@ exports.createProduct = (req, res) => {
         subcategoria,
         productImages,
         variantes,
+        tieneVariantes: tieneVariantes === 'true' || tieneVariantes === true,
+        combinacionesVariantes,
         stock: Number(stock), // Convertir stock a Number
+        codigoBarras: codigoBarras || '', // Agregar código de barras
         shop: user.shop 
       });
       await product.save();
@@ -156,7 +199,7 @@ exports.updateProduct = async (req, res) => {
       return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
     }
     // Solo permitir los campos editables
-    const allowedFields = ['nombre', 'sku', 'descripcion', 'precio', 'stock', 'categoria', 'subcategoria', 'estado', 'productImages', 'variantes'];
+    const allowedFields = ['nombre', 'sku', 'descripcion', 'precio', 'stock', 'categoria', 'subcategoria', 'estado', 'productImages', 'variantes', 'codigoBarras'];
     const updates = {};
     allowedFields.forEach(field => {
       if (req.body[field] !== undefined) {
@@ -213,7 +256,8 @@ exports.addProductImages = async (req, res) => {
         }
 
         try {
-            if (!req.files || req.files.length === 0) {
+            const uploadedFiles = req.files && (req.files.productImages || req.files);
+            if (!uploadedFiles || uploadedFiles.length === 0) {
                 return errorResponse(res, 'No se subió ningún archivo', 400);
             }
 
@@ -229,7 +273,8 @@ exports.addProductImages = async (req, res) => {
 
             // Subir todas las imágenes a Cloudinary y agregar las URLs al array
             const urls = [];
-            for (const file of req.files) {
+            const imagesToUpload = req.files.productImages || req.files || [];
+            for (const file of imagesToUpload) {
                 const imageUrl = await cloudinaryService.uploadImage(file.buffer, 'products');
                 urls.push(imageUrl);
             }

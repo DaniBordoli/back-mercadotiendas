@@ -42,6 +42,37 @@ const productSchema = new mongoose.Schema({
       required: true
     }]
   }],
+  tieneVariantes: {
+    type: Boolean,
+    default: false
+  },
+  combinacionesVariantes: [{
+    id: {
+      type: String,
+      required: true
+    },
+    combination: {
+      type: mongoose.Schema.Types.Mixed,
+      required: true
+    },
+    sku: {
+      type: String,
+      trim: true
+    },
+    price: {
+      type: String
+    },
+    stock: {
+      type: String
+    },
+    image: {
+      type: String
+    }
+  }],
+  codigoBarras: {
+    type: String,
+    trim: true
+  },
   shop: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Shop',
