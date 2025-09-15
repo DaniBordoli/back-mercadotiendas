@@ -199,7 +199,7 @@ exports.updateProduct = async (req, res) => {
       return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
     }
     // Solo permitir los campos editables
-    const allowedFields = ['nombre', 'sku', 'descripcion', 'precio', 'stock', 'categoria', 'subcategoria', 'estado', 'productImages', 'variantes', 'codigoBarras'];
+    const allowedFields = ['nombre', 'sku', 'descripcion', 'precio', 'oldPrice', 'discount', 'stock', 'categoria', 'subcategoria', 'estado', 'productImages', 'variantes', 'codigoBarras'];
     const updates = {};
     allowedFields.forEach(field => {
       if (req.body[field] !== undefined) {

@@ -23,6 +23,15 @@ const productSchema = new mongoose.Schema({
   precio: {
     type: String
   },
+  oldPrice: {
+    type: String
+  },
+  discount: {
+    type: Number,
+    min: 0,
+    max: 100,
+    default: 0
+  },
   stock: {
     type: Number
   },
