@@ -49,6 +49,16 @@ exports.getAllCategories = async (req, res) => {
   }
 };
 
+// Obtener categorías principales (público - sin autenticación)
+exports.getPublicMainCategories = async (req, res) => {
+  try {
+    const categories = await Category.find({ parent: { $exists: false } }).lean();
+    return successResponse(res, categories, 'Categorías principales obtenidas exitosamente');
+  } catch (error) {
+    return errorResponse(res, 'Error al obtener las categorías principales', 500, error.message);
+  }
+};
+
 // Obtener una categoría por ID
 exports.getCategoryById = async (req, res) => {
   try {
