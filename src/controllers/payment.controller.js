@@ -1,10 +1,12 @@
-const { createCheckout, checkPaymentStatus, processWebhook } = require('../services/mobbex.service');
+// Comentamos Mobbex y usamos el servicio mock
+// const { createCheckout, checkPaymentStatus, processWebhook } = require('../services/mobbex.service');
+const { createCheckout, checkPaymentStatus, processWebhook, simulateSuccessfulWebhook } = require('../services/mock-payment.service');
 const { successResponse, errorResponse } = require('../utils/response');
 const Payment = require('../models/Payment');
 const Shop = require('../models/Shop');
 const { updateProductStock } = require('./product.controller'); // Importar la función de stock
 const axios = require('axios');
-const mobbexConfig = require('../config/mobbex');
+// const mobbexConfig = require('../config/mobbex'); // No necesario para mock
 
 /**
  * Crea un checkout para un pedido
@@ -62,36 +64,37 @@ const createOrderCheckout = async (req, res) => {
     // Generar una referencia única para el pedido que se enviará a Mobbex
     orderData.reference = `order_${Date.now()}`;
 
-    // Crear checkout en Mobbex usando credenciales de la tienda
-    console.log('=== BACKEND: Ítems enviados a Mobbex service desde controller ===', JSON.stringify(items, null, 2));
-    console.log('=== BACKEND: Llamando al servicio de Mobbex ===');
+    // Crear checkout usando el servicio mock (reemplaza Mobbex temporalmente)
+    console.log('=== BACKEND: Ítems enviados al servicio mock desde controller ===', JSON.stringify(items, null, 2));
+    console.log('=== BACKEND: Llamando al servicio de pago mock ===');
     const checkoutResponse = await createCheckout(orderData, customerData, items, {
-      mobbexApiKey: shop.mobbexApiKey,
-      mobbexAccessToken: shop.mobbexAccessToken
+      // Las credenciales no son necesarias para el mock, pero mantenemos la estructura
+      mobbexApiKey: shop.mobbexApiKey || 'mock_api_key',
+      mobbexAccessToken: shop.mobbexAccessToken || 'mock_access_token'
     });
 
-    console.log('=== BACKEND: Respuesta del servicio Mobbex ===');
+    console.log('=== BACKEND: Respuesta del servicio mock ===');
     console.log('checkoutResponse:', JSON.stringify(checkoutResponse, null, 2));
 
-    // Si el checkout con Mobbex fue exitoso, crear y guardar el registro de pago en nuestra DB
+    // Si el checkout mock fue exitoso, crear y guardar el registro de pago en nuestra DB
     if (checkoutResponse.success && checkoutResponse.data.id) {
       const newPayment = new Payment({
         user: userId,
-        mobbexId: checkoutResponse.data.id,
-        reference: orderData.reference, // La referencia que enviamos a Mobbex
+        mobbexId: checkoutResponse.data.id, // Usamos el ID del mock
+        reference: orderData.reference, // La referencia que enviamos al mock
         amount: orderData.total,
         currency: orderData.currency || 'ARS',
         // Se asegura que el código de estado inicial siempre esté presente.
-        status: { code: '1', text: 'Mobbex Checkout Creado' }, // Usar estado de Mobbex
-        paymentMethod: null, // Mobbex no suele devolver el método de pago aquí, se actualiza con webhook
-        paymentData: checkoutResponse.data, // Guardar los datos completos de Mobbex checkout
+        status: { code: '1', text: 'Mock Checkout Creado' }, // Usar estado del mock
+        paymentMethod: null, // El mock no devuelve el método de pago aquí, se actualiza con webhook simulado
+        paymentData: checkoutResponse.data, // Guardar los datos completos del mock checkout
         items: paymentItems // Los ítems preparados
       });
       await newPayment.save();
-      console.log('=== BACKEND: Registro de pago creado exitosamente en DB local con MobbexId:', newPayment._id, '===');
+      console.log('=== BACKEND: Registro de pago creado exitosamente en DB local con MockId:', newPayment._id, '===');
     } else {
-      console.error('=== BACKEND: Error al obtener ID de Mobbex para el checkout ===');
-      throw new Error('Error al crear el checkout de pago con Mobbex.');
+      console.error('=== BACKEND: Error al obtener ID del mock para el checkout ===');
+      throw new Error('Error al crear el checkout de pago con el servicio mock.');
     }
 
     return successResponse(res, checkoutResponse, 'Checkout creado exitosamente');
@@ -125,10 +128,14 @@ const getPaymentStatus = async (req, res) => {
       return successResponse(res, existingPayment, 'Estado del pago obtenido desde la base de datos');
     }
 
-    // Si no existe en nuestra base de datos, consultamos a Mobbex
-    const paymentStatus = await checkPaymentStatus(id);
+    // Si no existe en nuestra base de datos, consultamos el servicio mock
+    const paymentStatusResponse = await checkPaymentStatus(id);
 
-    return successResponse(res, paymentStatus, 'Estado del pago obtenido exitosamente');
+    if (!paymentStatusResponse.success) {
+      return errorResponse(res, 'Error al obtener el estado del pago', 500);
+    }
+
+    return successResponse(res, paymentStatusResponse.data, 'Estado del pago obtenido exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al verificar el estado del pago', 500, error.message);
   }
@@ -157,6 +164,12 @@ const handleWebhook = async (req, res) => {
     });
     
     if (payment) {
+      // Verificar que el pago tenga un usuario válido asociado
+      if (!payment.user) {
+        console.warn('=== BACKEND: Webhook recibido para un pago sin usuario asociado. Ignorando webhook. PaymentId:', payment._id, '===');
+        return res.status(200).json({ success: true, message: 'Webhook ignorado - pago sin usuario' });
+      }
+
       // Actualizar el pago existente
       payment.status = paymentInfo.status;
       payment.paymentMethod = paymentInfo.paymentMethod;
@@ -262,11 +275,73 @@ const getMobbexCredentials = async (req, res) => {
   }
 };
 
+/**
+ * Simula la finalización exitosa de un pago mock
+ * @param {Object} req - Request
+ * @param {Object} res - Response
+ */
+const completeMockPayment = async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+
+    console.log('=== MOCK PAYMENT: Completando pago simulado ===', paymentId);
+
+    // Buscar el pago en la base de datos
+    const payment = await Payment.findOne({ mobbexId: paymentId });
+
+    if (!payment) {
+      return errorResponse(res, 'Pago no encontrado', 404);
+    }
+
+    // Simular webhook exitoso
+    const webhookData = simulateSuccessfulWebhook(paymentId, payment.reference);
+    
+    // Procesar el webhook simulado
+    const paymentInfo = processWebhook(webhookData);
+    
+    // Actualizar el pago
+    payment.status = paymentInfo.status;
+    payment.paymentMethod = paymentInfo.paymentMethod;
+    payment.paymentData = { ...payment.paymentData, ...webhookData.payment };
+    payment.updatedAt = new Date();
+    
+    await payment.save();
+    console.log('=== MOCK PAYMENT: Pago actualizado exitosamente ===', payment._id);
+
+    // Actualizar stock de productos (simula el comportamiento del webhook real)
+    if (paymentInfo.status.code === '2') {
+      console.log('=== MOCK PAYMENT: Actualizando stock de productos... ===');
+      for (const item of payment.items) {
+        console.log(`=== MOCK PAYMENT: Actualizando stock - Product ID: ${item.productId}, Quantity: ${item.quantity} ===`);
+        try {
+          const stockResult = await updateProductStock(item.productId, item.quantity);
+          if (!stockResult.success) {
+            console.warn(`=== MOCK PAYMENT: No se pudo actualizar stock para producto ${item.productId}: ${stockResult.message} ===`);
+          }
+        } catch (error) {
+          console.error(`=== MOCK PAYMENT: Error al actualizar stock para producto ${item.productId}:`, error);
+          // Continuar con el siguiente producto en lugar de fallar completamente
+        }
+      }
+    }
+
+    return successResponse(res, {
+      payment: payment,
+      message: 'Pago mock completado exitosamente'
+    }, 'Pago procesado exitosamente');
+
+  } catch (error) {
+    console.error('Error al completar pago mock:', error);
+    return errorResponse(res, 'Error al procesar el pago mock', 500, error.message);
+  }
+};
+
 module.exports = {
   createOrderCheckout,
   getPaymentStatus,
   handleWebhook,
   getUserPayments,
   getMobbexConnectUrl,
-  getMobbexCredentials
+  getMobbexCredentials,
+  completeMockPayment
 };

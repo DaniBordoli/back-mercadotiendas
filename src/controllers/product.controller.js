@@ -295,6 +295,12 @@ exports.addProductImages = async (req, res) => {
  */
 exports.updateProductStock = async (productId, quantityToReduce) => {
   try {
+    // Validar que productId sea un ObjectId válido
+    if (!productId || !productId.toString().match(/^[0-9a-fA-F]{24}$/)) {
+      console.warn(`[Stock Update] ProductId inválido: ${productId}`);
+      return { success: false, message: 'ProductId inválido' };
+    }
+
     const product = await Product.findById(productId);
 
     if (!product) {
@@ -304,7 +310,7 @@ exports.updateProductStock = async (productId, quantityToReduce) => {
 
     if (product.stock < quantityToReduce) {
       console.warn(`[Stock Update] Stock insuficiente para producto ${productId}. Stock actual: ${product.stock}, intento de reducir: ${quantityToReduce}`);
-      // Opcional: Podríamos lanzar un error aquí si el stock insuficiente es un error crítico
+      // No lanzar error, solo advertir y continuar
       return { success: false, message: 'Stock insuficiente' };
     }
 
@@ -314,7 +320,8 @@ exports.updateProductStock = async (productId, quantityToReduce) => {
     return { success: true, newStock: product.stock };
   } catch (error) {
     console.error(`[Stock Update] Error al actualizar stock para producto ${productId}:`, error);
-    throw new Error(`Error al actualizar stock: ${error.message}`);
+    // No lanzar error, solo loggearlo y continuar
+    return { success: false, message: `Error al actualizar stock: ${error.message}` };
   }
 };
 

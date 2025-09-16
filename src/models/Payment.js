@@ -72,7 +72,7 @@ const paymentSchema = new mongoose.Schema({
   
   // Método de pago utilizado
   paymentMethod: {
-    type: String
+    type: Object
   },
   
   // Datos adicionales del pago (como cuotas, etc.)
@@ -93,10 +93,15 @@ const paymentSchema = new mongoose.Schema({
   }
 });
 
-// Actualizar la fecha de modificación antes de guardar
+const { validatePaymentUser } = require('../middleware/payment-validation');
+
+// Middleware para actualizar updatedAt antes de guardar
 paymentSchema.pre('save', function(next) {
-  this.updatedAt = Date.now();
+  this.updatedAt = new Date();
   next();
 });
+
+// Middleware para validar que el usuario existe antes de guardar
+paymentSchema.pre('save', validatePaymentUser);
 
 module.exports = mongoose.model('Payment', paymentSchema);
