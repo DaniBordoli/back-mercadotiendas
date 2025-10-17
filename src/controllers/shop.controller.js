@@ -86,6 +86,21 @@ exports.createShop = async (req, res) => {
       }
     }
 
+    // Parse categories/subcategories if received as strings (from FormData)
+    if (typeof shopData.categories === 'string') {
+      try {
+        shopData.categories = JSON.parse(shopData.categories);
+      } catch (e) {
+        shopData.categories = [];
+      }
+    }
+    if (typeof shopData.subcategories === 'string') {
+      try {
+        shopData.subcategories = JSON.parse(shopData.subcategories);
+      } catch (e) {
+        shopData.subcategories = [];
+      }
+    }
     const shopModelData = {
       name: shopData.shopName,
       description: shopData.description || '', // Provide default if optional
@@ -99,6 +114,9 @@ exports.createShop = async (req, res) => {
         ? templateUpdate 
         : null, // Usar null en lugar de {} para indicar que no hay template configurado
       owner: userId,
+      // Nuevos campos de categorías y subcategorías (IDs)
+      categories: Array.isArray(shopData.categories) ? shopData.categories.map(c => c.id || c) : [],
+      subcategories: Array.isArray(shopData.subcategories) ? shopData.subcategories.map(s => s.id || s) : [],
       // active: true, // Default is true in model
       // imageUrl: null, // Default is null
     };
@@ -149,7 +167,9 @@ exports.createShop = async (req, res) => {
 exports.getShop = async (req, res) => {
   try {
     const { id } = req.params;
-    const shop = await Shop.findById(id);
+    const shop = await Shop.findById(id)
+      .populate('categories', 'name description')
+      .populate('subcategories', 'name description');
     
     if (!shop) {
       return errorResponse(res, 'Tienda no encontrada', 404);
@@ -167,7 +187,9 @@ exports.getPublicShop = async (req, res) => {
     const { id } = req.params;
     console.log('Buscando tienda pública con ID:', id);
     
-    const shop = await Shop.findById(id);
+    const shop = await Shop.findById(id)
+      .populate('categories', 'name description')
+      .populate('subcategories', 'name description');
     console.log('Tienda encontrada:', shop ? 'Sí' : 'No');
     
     if (!shop) {
@@ -304,7 +326,13 @@ exports.updateShopTemplate = async (req, res) => {
     if (!templateUpdate || typeof templateUpdate !== 'object') {
       return errorResponse(res, 'templateUpdate es requerido y debe ser un objeto', 400);
     }
-    const user = await User.findById(userId).populate('shop');
+    const user = await User.findById(userId).populate({
+      path: 'shop',
+      populate: [
+        { path: 'categories', select: 'name description' },
+        { path: 'subcategories', select: 'name description' }
+      ]
+    });
     if (!user || !user.shop) {
       return errorResponse(res, 'Tienda no encontrada para el usuario', 404);
     }
@@ -366,7 +394,13 @@ exports.getMyShop = async (req, res) => {
   try {
     const userId = req.user.id;
     
-    const user = await User.findById(userId).populate('shop');
+    const user = await User.findById(userId).populate({
+      path: 'shop',
+      populate: [
+        { path: 'categories', select: 'name description' },
+        { path: 'subcategories', select: 'name description' }
+      ]
+    });
     
     if (!user || !user.shop) {
       return errorResponse(res, 'Usuario no tiene tienda asociada', 404);

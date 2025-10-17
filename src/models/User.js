@@ -92,6 +92,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  youtubeTokens: {
+    type: Object, // Almacena access_token, refresh_token, scope, expiry_date, etc.
+    default: null
+  },
   isInfluencer: {
     type: Boolean,
     default: false

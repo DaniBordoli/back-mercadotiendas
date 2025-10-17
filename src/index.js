@@ -2,6 +2,9 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 const { config } = require('./config');
+const fs = require('fs');
+const https = require('https');
+const path = require('path');
 const connectDB = require('./config/database');
 const routes = require('./routes');
 const { errorHandler, notFound } = require('./middlewares/error');
@@ -35,10 +38,31 @@ app.use(notFound);
 // Error handler
 app.use(errorHandler);
 
-// Start server
+// Start HTTP server
 const server = app.listen(config.port, () => {
-  console.log(`Server running on port ${config.port}`);
+  console.log(`HTTP server running on port ${config.port}`);
 });
+
+// Optional HTTPS server
+if (process.env.ENABLE_HTTPS === 'true') {
+  try {
+    const keyPath = path.resolve(__dirname, '..', process.env.SSL_KEY_FILE || 'cert/local.key');
+    const certPath = path.resolve(__dirname, '..', process.env.SSL_CERT_FILE || 'cert/local.crt');
+
+    const httpsOptions = {
+      key: fs.readFileSync(keyPath),
+      cert: fs.readFileSync(certPath)
+    };
+
+    const httpsPort = process.env.HTTPS_PORT || 3003;
+
+    https.createServer(httpsOptions, app).listen(httpsPort, () => {
+      console.log(`HTTPS server running on port ${httpsPort}`);
+    });
+  } catch (err) {
+    console.error('Failed to start HTTPS server:', err.message);
+  }
+}
 
 // Manejo de errores no capturados
 process.on('unhandledRejection', (err) => {

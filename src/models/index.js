@@ -5,6 +5,7 @@ const Shop = require('./Shop');
 const Products = require('./Products');
 const Campaign = require('./Campaign');
 const CampaignApplication = require('./CampaignApplication');
+const LiveEvent = require('./LiveEvent');
 
 module.exports = {
   User,
@@ -13,6 +14,7 @@ module.exports = {
   Shop,
   Products,
   Campaign,
-  CampaignApplication
+  CampaignApplication,
+  LiveEvent
 };
 

@@ -23,6 +23,15 @@ const shopSchema = new mongoose.Schema({
     type: String,
     default: 'other'
   },
+  // Nuevos campos: arrays de categorías y subcategorías seleccionadas por el usuario
+  categories: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Category'
+  }],
+  subcategories: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Subcategory'
+  }],
   address: {
     type: String,
     default: ''

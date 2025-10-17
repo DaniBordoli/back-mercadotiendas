@@ -13,12 +13,18 @@ const shopSocialRoutes = require('./shopsocial.routes');
 const currencyRoutes = require('./currency.routes');
 const shopInstitutionalRoutes = require('./shopInstitutional.routes');
 const campaignRoutes = require('./campaign.routes');
+const liveEventRoutes = require('./liveEvent.routes');
 const campaignApplicationRoutes = require('./campaignApplication.routes');
 const uploadRoutes = require('./upload.routes');
 const influencerRoutes = require('./influencer');
+const tiktokAuthRoutes = require('./tiktok.routes');
+const youtubeAuthRoutes = require('./youtube.routes');
 
 // Rutas de autenticación (/api/auth/*)
 router.use('/auth', authRoutes);
+// Rutas de autenticación TikTok (/api/auth/tiktok)
+router.use('/auth/tiktok', tiktokAuthRoutes);
+router.use('/auth/youtube', youtubeAuthRoutes);
 
 // Rutas de usuario (/api/users/*)
 router.use('/users', userRoutes);
@@ -58,6 +64,7 @@ router.use('/shop-institutional', shopInstitutionalRoutes);
 
 // Rutas de campañas (/api/campaigns/*)
 router.use('/campaigns', campaignRoutes);
+router.use('/live-events', liveEventRoutes);
 
 // Rutas de aplicaciones a campañas (/api/applications/*)
 router.use('/applications', campaignApplicationRoutes);
