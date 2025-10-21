@@ -165,10 +165,14 @@ exports.getMyProducts = async (req, res) => {
       return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
     }
     
-    const products = await Product.find({ 
-      shop: user.shop, 
-      estado: 'Activo' 
-    }).populate('shop', 'name');
+    // Permitir obtener todos los productos de la tienda, opcionalmente filtrar por estado si se pasa como query ?estado=Activo
+    const { estado } = req.query;
+    const query = { shop: user.shop };
+    if (estado) {
+      query.estado = estado;
+    }
+
+    const products = await Product.find(query).populate('shop', 'name');
     
     return successResponse(res, products, 'Productos de la tienda obtenidos exitosamente');
   } catch (error) {

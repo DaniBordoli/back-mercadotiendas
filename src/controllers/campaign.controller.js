@@ -92,7 +92,7 @@ exports.createCampaign = async (req, res) => {
       });
     }
     
-    const { name, description, budget, imageUrl, endDate, status, category, requirements } = req.body;
+    const { name, description, budget, imageUrl, endDate, status, category, requirements, products = [], milestones = [], kpis = {} } = req.body;
     
     // Verificar que el usuario tiene una tienda
     const user = await User.findById(req.user.id).populate('shop');
@@ -104,6 +104,7 @@ exports.createCampaign = async (req, res) => {
       });
     }
     
+    // Crear la campaña
     const campaign = new Campaign({
       name,
       description,
@@ -113,7 +114,10 @@ exports.createCampaign = async (req, res) => {
       endDate,
       status: status || 'draft',
       category,
-      requirements
+      requirements,
+      products,
+      milestones,
+      kpis
     });
     
     await campaign.save();
@@ -141,7 +145,7 @@ exports.createCampaign = async (req, res) => {
 exports.updateCampaign = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, budget, imageUrl, endDate, status, category, requirements } = req.body;
+    const { name, description, budget, imageUrl, endDate, status, category, requirements, products, milestones, kpis } = req.body;
     
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -179,6 +183,9 @@ exports.updateCampaign = async (req, res) => {
     campaign.status = status || campaign.status;
     campaign.category = category || campaign.category;
     campaign.requirements = requirements || campaign.requirements;
+    if (products !== undefined) campaign.products = products;
+    if (milestones !== undefined) campaign.milestones = milestones;
+    if (kpis !== undefined) campaign.kpis = kpis;
     
     await campaign.save();
     

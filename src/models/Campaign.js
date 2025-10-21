@@ -44,6 +44,46 @@ const campaignSchema = new mongoose.Schema({
     type: String,
     required: false
   },
+  // Nuevos campos para el flujo del wizard
+  products: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Product',
+    },
+  ],
+  milestones: [
+    {
+      name: { type: String, required: false },
+      description: { type: String, required: false },
+      date: { type: Date, required: false },
+    },
+  ],
+  kpis: {
+    clicks: {
+      selected: { type: Boolean, default: false },
+      target: { type: Number, default: 0 },
+    },
+    sales: {
+      selected: { type: Boolean, default: false },
+      target: { type: Number, default: 0 },
+    },
+    viewers: {
+      selected: { type: Boolean, default: false },
+      target: { type: Number, default: 0 },
+    },
+    addtocart: {
+      selected: { type: Boolean, default: false },
+      target: { type: Number, default: 0 },
+    },
+    ctr: {
+      selected: { type: Boolean, default: false },
+      target: { type: Number, default: 0 },
+    },
+    revenue: {
+      selected: { type: Boolean, default: false },
+      target: { type: Number, default: 0 },
+    },
+  },
   applicationsCount: {
     type: Number,
     default: 0

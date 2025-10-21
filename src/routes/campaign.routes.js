@@ -34,6 +34,12 @@ router.delete('/:id', verifyToken, campaignController.deleteCampaign);
 // GET /api/campaigns/shop/:shopId - Obtener campañas por tienda
 router.get('/shop/:shopId', campaignController.getCampaignsByShop);
 
+// PATCH /api/campaigns/:id/step2 - Guardar paso 2 (productos)
+router.patch('/:id/step2', verifyToken, campaignController.updateCampaign);
+
+// PATCH /api/campaigns/:id/step3 - Guardar paso 3 (milestones y KPIs)
+router.patch('/:id/step3', verifyToken, campaignController.updateCampaign);
+
 // PATCH /api/campaigns/:id/status - Actualizar estado de una campaña (requiere autenticación)
 router.patch('/:id/status', verifyToken, campaignController.updateCampaignStatus);
 
