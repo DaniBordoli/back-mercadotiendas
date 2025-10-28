@@ -43,6 +43,183 @@ const server = app.listen(config.port, () => {
   console.log(`HTTP server running on port ${config.port}`);
 });
 
+// --- Socket.IO setup ---
+const { Server } = require('socket.io');
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST', 'PATCH']
+  }
+});
+
+// Mapa para llevar un intervalo por cada sala de evento
+const eventIntervals = new Map();
+
+// Exponer instancia de io a través de la app para usarla en controladores
+app.set('io', io);
+
+io.on('connection', (socket) => {
+  console.log('Cliente Socket.IO conectado:', socket.id);
+
+  // Permite que el cliente se una a una sala específica del evento si envía eventId
+  socket.on('joinEventRoom', async (eventId) => {
+    if (eventId) {
+      socket.join(`event_${eventId}`);
+      // Guardamos en la instancia del socket qué evento sigue este cliente
+      socket.data = socket.data || {};
+      socket.data.joinedEventId = eventId;
+
+      try {
+        // Cargar modelos de manera perezosa para evitar dependencias circulares
+        const LiveEventMetrics = require('./models/LiveEventMetrics');
+        const LiveEvent = require('./models/LiveEvent');
+
+        // Obtener tamaño actual de la sala (número de espectadores concurrentes)
+        const room = io.sockets.adapter.rooms.get(`event_${eventId}`);
+        const currentViewers = room ? room.size : 1; // incluir al espectador actual
+
+        // --- Cálculo de duración y promedio de concurrentes ---
+        // Primero, calculamos durationSeconds actual basado en la hora de inicio del evento
+        let calculatedDurationSeconds;
+        try {
+          const liveEvent = await LiveEvent.findById(eventId).select('startDateTime status updatedAt');
+          if (liveEvent && liveEvent.startDateTime) {
+            const endTime = liveEvent.status === 'finished' && liveEvent.updatedAt ? liveEvent.updatedAt : new Date();
+            const diffMs = endTime.getTime() - new Date(liveEvent.startDateTime).getTime();
+            calculatedDurationSeconds = Math.max(1, Math.floor(diffMs / 1000)); // al menos 1s para evitar división por cero
+          }
+        } catch (err) {
+          console.warn('No se pudo calcular durationSeconds en joinEventRoom', err.message);
+        }
+
+        // Recuperar métricas existentes para calcular nuevo promedio de espectadores concurrentes
+        let existingMetrics = await LiveEventMetrics.findOne({ event: eventId });
+        const prevAvg = existingMetrics?.avgConcurrentViewers || 0;
+        const prevDuration = existingMetrics?.durationSeconds || 0;
+        const durationForAvg = calculatedDurationSeconds ?? prevDuration;
+
+        // Calcular nuevo promedio ponderado de espectadores concurrentes
+        let newAvgConcurrent = prevAvg;
+        if (durationForAvg > 0) {
+          // Formula: (prevAvg * prevDuration + currentViewers) / (prevDuration + 1)
+          newAvgConcurrent = ((prevAvg * prevDuration) + currentViewers) / (prevDuration + 1);
+        } else {
+          newAvgConcurrent = currentViewers;
+        }
+
+        // Construir objeto de actualización
+        const update = {
+          $inc: { uniqueViewers: 1 },
+          $max: { peakViewers: currentViewers },
+          $set: {
+             avgConcurrentViewers: Math.round(newAvgConcurrent),
+             ...(durationForAvg !== undefined ? { durationSeconds: durationForAvg } : {})
+           }
+         };
+
+        // Actualizar o crear métricas automáticamente
+        const metrics = await LiveEventMetrics.findOneAndUpdate(
+          { event: eventId },
+          update,
+          { new: true, upsert: true }
+        );
+
+        // Emitir actualización a la sala
+        io.to(`event_${eventId}`).emit('metricsUpdated', { eventId, metrics });
+
+        // Iniciar intervalo para capturar avgConcurrentViewers cada 30s si aún no existe
+        if (!eventIntervals.has(eventId)) {
+          const intervalId = setInterval(async () => {
+            try {
+              const roomNow = io.sockets.adapter.rooms.get(`event_${eventId}`);
+              const viewersNow = roomNow ? roomNow.size : 0;
+              const liveEvent = await LiveEvent.findById(eventId).select('startDateTime status updatedAt');
+              if (!liveEvent || !liveEvent.startDateTime) return;
+
+              const endTime = liveEvent.status === 'finished' && liveEvent.updatedAt ? liveEvent.updatedAt : new Date();
+              const diffMs = endTime.getTime() - new Date(liveEvent.startDateTime).getTime();
+              const durationSeconds = Math.max(1, Math.floor(diffMs / 1000));
+
+              const metricsCurrent = await LiveEventMetrics.findOne({ event: eventId });
+              const prevAvgI = metricsCurrent?.avgConcurrentViewers || 0;
+              const prevDurI = metricsCurrent?.durationSeconds || 0;
+              const newAvgI = ((prevAvgI * prevDurI) + viewersNow) / (durationSeconds);
+
+              const updated = await LiveEventMetrics.findOneAndUpdate(
+                { event: eventId },
+                { $set: { avgConcurrentViewers: Math.round(newAvgI), durationSeconds } },
+                { new: true, upsert: true }
+              );
+
+              io.to(`event_${eventId}`).emit('metricsUpdated', { eventId, metrics: updated });
+
+              // Si el evento terminó, limpiamos intervalo
+              if (liveEvent.status === 'finished') {
+                clearInterval(intervalId);
+                eventIntervals.delete(eventId);
+              }
+            } catch (iErr) {
+              console.error('Error en intervalo de métricas', iErr);
+            }
+          }, 30000); // cada 30 segundos
+
+          eventIntervals.set(eventId, intervalId);
+        }
+      } catch (err) {
+        console.error('Error actualizando métricas en joinEventRoom:', err);
+      }
+    }
+  });
+
+  socket.on('disconnect', async () => {
+    console.log('Cliente Socket.IO desconectado:', socket.id);
+    const eventId = socket.data?.joinedEventId;
+    if (!eventId) return;
+
+    // Obtenemos la sala y el número actual de espectadores tras la desconexión
+    const room = io.sockets.adapter.rooms.get(`event_${eventId}`);
+    const currentViewers = room ? room.size : 0;
+
+    try {
+      const LiveEventMetrics = require('./models/LiveEventMetrics');
+      const metricsDoc = await LiveEventMetrics.findOne({ event: eventId });
+      if (!metricsDoc) return;
+
+      // Recalcular avgConcurrentViewers si hay duración disponible
+      const prevAvg = metricsDoc.avgConcurrentViewers || 0;
+      const prevDuration = metricsDoc.durationSeconds || 0;
+      const newDuration = prevDuration + 1; // sumamos 1 segundo al tiempo acumulado mínimo
+      let newAvg = prevAvg;
+      if (newDuration > 0) {
+        newAvg = ((prevAvg * prevDuration) + currentViewers) / newDuration;
+      }
+
+      const update = {
+        $set: {
+          avgConcurrentViewers: Math.round(newAvg),
+          durationSeconds: newDuration,
+        }
+      };
+
+      await LiveEventMetrics.updateOne({ event: eventId }, update);
+
+      // Emitir actualización a la sala restante si quedan espectadores
+      io.to(`event_${eventId}`).emit('metricsUpdated', {
+        eventId,
+        metrics: { ...metricsDoc.toObject(), ...update.$set }
+      });
+
+      // Si ya no hay espectadores, limpiar intervalo de la sala
+      if (currentViewers === 0 && eventIntervals.has(eventId)) {
+        clearInterval(eventIntervals.get(eventId));
+        eventIntervals.delete(eventId);
+      }
+    } catch (e) {
+      console.error('Error actualizando métricas en disconnect', e);
+    }
+  });
+});
+
 // Optional HTTPS server
 if (process.env.ENABLE_HTTPS === 'true') {
   try {

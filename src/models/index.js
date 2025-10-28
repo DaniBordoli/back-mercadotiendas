@@ -6,6 +6,9 @@ const Products = require('./Products');
 const Campaign = require('./Campaign');
 const CampaignApplication = require('./CampaignApplication');
 const LiveEvent = require('./LiveEvent');
+const ProductVisit = require('./ProductVisit');
+const LiveEventMetrics = require('./LiveEventMetrics');
+const LiveEventProductMetrics = require('./LiveEventProductMetrics');
 
 module.exports = {
   User,
@@ -15,6 +18,9 @@ module.exports = {
   Products,
   Campaign,
   CampaignApplication,
-  LiveEvent
+  LiveEvent,
+  ProductVisit,
+  LiveEventMetrics,
+  LiveEventProductMetrics
 };
 

@@ -47,6 +47,16 @@ const liveEventSchema = new mongoose.Schema(
       ref: 'Product',
       default: null,
     },
+    // Nuevo: producto actualmente destacado y marca de tiempo de inicio
+    currentHighlightedProduct: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Product',
+      default: null,
+    },
+    highlightStartedAt: {
+      type: Date,
+      default: null,
+    },
     socialAccounts: [{
       platform: { type: String },
       username: { type: String },

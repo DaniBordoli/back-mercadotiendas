@@ -7,7 +7,10 @@ const { verifyToken } = require('../middlewares/auth');
 // POST /api/applications/campaign/:campaignId - Aplicar a una campaña (requiere autenticación)
 router.post('/campaign/:campaignId', verifyToken, [
   check('message', 'El mensaje es obligatorio').not().isEmpty(),
-  check('socialMediaLinks', 'Los enlaces de redes sociales deben ser un array').isArray()
+  check('socialMediaLinks', 'Los enlaces de redes sociales deben ser un array').optional().isArray(),
+  check('platforms', 'Las plataformas deben ser un array').optional().isArray(),
+  check('milestones', 'Los hitos deben ser un array').optional().isArray(),
+  check('totalAmount', 'El monto total debe ser numérico').optional().isNumeric()
 ], (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {

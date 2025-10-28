@@ -32,6 +32,7 @@ const verifyTokenMiddleware = async (req, res, next) => {
 
     // Agregar usuario al request
     req.user = user;
+    req.userId = user._id; // añadir el userId al request para uso en controladores
     // MT-30: Validar roles de usuario para login con roles
     req.userRole = user.role || 'user';
     next();

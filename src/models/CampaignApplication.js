@@ -25,10 +25,32 @@ const campaignApplicationSchema = new mongoose.Schema({
       required: true
     },
     followers: {
-      type: Number,
-      required: false
+      type: Number
     }
   }],
+
+  // Plataformas seleccionadas (en caso de diferenciar de socialMediaLinks)
+  platforms: [{
+    platform: { type: String, required: true },
+    url: { type: String },
+    followers: { type: Number },
+    cost: { type: Number }
+  }],
+
+  // Arreglo de hitos propuestos por el influencer
+  milestones: [{
+    title: { type: String, required: true },
+    startDate: { type: Date, required: true },
+    endDate: { type: Date, required: true },
+    amount: { type: Number, required: true }
+  }],
+
+  // Monto total de la propuesta (suma de los hitos)
+  totalAmount: {
+    type: Number,
+    required: false
+  },
+
   status: {
     type: String,
     enum: ['pending', 'accepted', 'rejected'],

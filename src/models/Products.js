@@ -41,6 +41,10 @@ const productSchema = new mongoose.Schema({
   subcategoria: {
     type: String
   },
+  visitas: {
+    type: Number,
+    default: 0
+  },
   variantes: [{
     tipo: {
       type: String,

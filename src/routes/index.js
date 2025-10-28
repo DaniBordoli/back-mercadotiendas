@@ -10,10 +10,12 @@ const subcategoryRoutes = require('./subcategory.routes');
 const paymentRoutes = require('./payment.routes');
 const shopSingleRoutes = require('./shop.routes');
 const shopSocialRoutes = require('./shopsocial.routes');
+const shopVisitRoutes = require('./shopVisit.routes');
 const currencyRoutes = require('./currency.routes');
 const shopInstitutionalRoutes = require('./shopInstitutional.routes');
 const campaignRoutes = require('./campaign.routes');
 const liveEventRoutes = require('./liveEvent.routes');
+const productQuestionRoutes = require('./productQuestion.routes');
 const campaignApplicationRoutes = require('./campaignApplication.routes');
 const uploadRoutes = require('./upload.routes');
 const influencerRoutes = require('./influencer');
@@ -28,6 +30,8 @@ router.use('/auth/youtube', youtubeAuthRoutes);
 
 // Rutas de usuario (/api/users/*)
 router.use('/users', userRoutes);
+// Rutas de preguntas de producto
+router.use('/product-questions', productQuestionRoutes);
 
 // Rutas de tienda (/api/shops/*)
 router.use('/shops', shopRoutes);
@@ -55,6 +59,9 @@ router.use('/test', testRoutes);
 
 // Rutas de redes sociales de la tienda (/api/shopsocial/*)
 router.use('/shopsocial', shopSocialRoutes);
+
+// Rutas de visitas de la tienda (/api/shop-visits/*)
+router.use('/shop-visits', shopVisitRoutes);
 
 // Rutas de monedas (/api/currencies/*)
 router.use('/currencies', currencyRoutes);

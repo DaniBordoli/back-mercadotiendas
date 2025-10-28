@@ -2,6 +2,8 @@ const Product = require('../models/Products');
 const { successResponse, errorResponse } = require('../utils/response');
 const cloudinaryService = require('../services/cloudinary.service');
 const multer = require('multer');
+const ProductVisit = require('../models/ProductVisit');
+const LiveEventMetrics = require('../models/LiveEventMetrics');
 
 // Configurar multer para manejar la carga de múltiples archivos en memoria para productos
 const uploadProductImages = multer({
@@ -29,7 +31,7 @@ exports.createProduct = (req, res) => {
     }
 
     try {
-      const { nombre, descripcion, sku, estado, precio, categoria, stock, subcategoria, codigoBarras, tieneVariantes } = req.body;
+      const { nombre, descripcion, sku, estado, precio, oldPrice, discount, categoria, stock, subcategoria, codigoBarras, tieneVariantes } = req.body;
       
       // Procesar variantes
       let variantes = req.body.variantes;
@@ -102,6 +104,8 @@ exports.createProduct = (req, res) => {
         estado,
         precio,
         categoria,
+        oldPrice,
+        discount,
         subcategoria,
         productImages,
         variantes,
@@ -188,6 +192,31 @@ exports.getProductById = async (req, res) => {
     if (!product) {
       return errorResponse(res, 'Producto no encontrado', 404);
     }
+
+    // Registrar la visita (no esperamos a que termine para responder)
+    if (product.shop) {
+      ProductVisit.create({ product: product._id, shop: product.shop }).catch(console.error);
+    }
+
+    // Incrementar clics en productos si se proporciona liveEventId
+    const { liveEventId } = req.query;
+    if (liveEventId) {
+      // Incrementar clics a nivel de evento (métrica agregada)
+      LiveEventMetrics.updateOne(
+        { event: liveEventId },
+        { $inc: { productClicks: 1 } },
+        { upsert: true }
+      ).catch(console.error);
+
+      // Incrementar clics por producto destacado dentro del evento
+      const LiveEventProductMetrics = require('../models/LiveEventProductMetrics');
+      LiveEventProductMetrics.updateOne(
+        { event: liveEventId, product: product._id },
+        { $inc: { clicks: 1 } },
+        { upsert: true }
+      ).catch(console.error);
+    }
+
     return successResponse(res, product, 'Producto obtenido exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al obtener el producto', 500, error.message);
@@ -389,3 +418,42 @@ exports.getProductsByShop = async (req, res) => {
     return errorResponse(res, 'Error al obtener los productos de la tienda', 500, error.message);
   }
 };
+
+// Obtener el total de visitas del mes actual para la tienda del usuario autenticado
+exports.getMonthlyVisits = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user || !user.shop) {
+      return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
+    }
+
+    // Calcular inicio y fin del mes actual
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+    const resultado = await ProductVisit.aggregate([
+      {
+        $match: {
+          shop: user.shop,
+          visitedAt: {
+            $gte: startOfMonth,
+            $lte: endOfMonth
+          }
+        }
+      },
+      {
+        $count: 'total'
+      }
+    ]);
+
+    const totalVisitasMes = resultado.length > 0 ? resultado[0].total : 0;
+
+    return successResponse(res, { totalVisitasMes }, 'Visitas del mes obtenidas exitosamente');
+  } catch (error) {
+    return errorResponse(res, 'Error al obtener las visitas del mes', 500, error.message);
+  }
+};
+
+// appended at end
+exports.getProductByIdPublic = exports.getProductById;

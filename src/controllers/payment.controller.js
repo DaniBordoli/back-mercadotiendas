@@ -7,6 +7,8 @@ const Shop = require('../models/Shop');
 const { updateProductStock } = require('./product.controller'); // Importar la función de stock
 const axios = require('axios');
 // const mobbexConfig = require('../config/mobbex'); // No necesario para mock
+const LiveEventMetrics = require('../models/LiveEventMetrics');
+const LiveEventProductMetrics = require('../models/LiveEventProductMetrics');
 
 /**
  * Crea un checkout para un pedido
@@ -58,7 +60,8 @@ const createOrderCheckout = async (req, res) => {
       quantity: item.quantity,
       unitPrice: item.price,
       productName: item.name,
-      productImage: item.image
+      productImage: item.image,
+      shopName: shop.name // Guardamos el nombre de la tienda
     }));
 
     // Generar una referencia única para el pedido que se enviará a Mobbex
@@ -78,17 +81,18 @@ const createOrderCheckout = async (req, res) => {
 
     // Si el checkout mock fue exitoso, crear y guardar el registro de pago en nuestra DB
     if (checkoutResponse.success && checkoutResponse.data.id) {
+      const { liveEventId } = req.body;
       const newPayment = new Payment({
         user: userId,
-        mobbexId: checkoutResponse.data.id, // Usamos el ID del mock
-        reference: orderData.reference, // La referencia que enviamos al mock
+        mobbexId: checkoutResponse.data.id,
+        reference: orderData.reference,
         amount: orderData.total,
         currency: orderData.currency || 'ARS',
-        // Se asegura que el código de estado inicial siempre esté presente.
-        status: { code: '1', text: 'Mock Checkout Creado' }, // Usar estado del mock
-        paymentMethod: null, // El mock no devuelve el método de pago aquí, se actualiza con webhook simulado
-        paymentData: checkoutResponse.data, // Guardar los datos completos del mock checkout
-        items: paymentItems // Los ítems preparados
+        status: { code: '1', text: 'Mock Checkout Creado' },
+        paymentMethod: null,
+        paymentData: checkoutResponse.data,
+        items: paymentItems,
+        ...(liveEventId ? { liveEvent: liveEventId } : {})
       });
       await newPayment.save();
       console.log('=== BACKEND: Registro de pago creado exitosamente en DB local con MockId:', newPayment._id, '===');
@@ -181,6 +185,49 @@ const handleWebhook = async (req, res) => {
       console.log('=== BACKEND: Estado del pago en webhook:', paymentInfo.status.code, '==='); // Nuevo log
 
       // Si el pago es aprobado, actualizar el stock de los productos
+      if ((paymentInfo.status.code === '2' || paymentInfo.status.code === '200') && payment.liveEvent) {
+        // Incrementar compras y monto de ventas
+        LiveEventMetrics.updateOne(
+          { event: payment.liveEvent },
+          {
+            $inc: {
+              purchases: 1,
+              salesAmount: payment.amount || 0
+            }
+          },
+          { upsert: true }
+        ).catch(console.error);
+
+        // Actualizar métricas por producto (purchases y revenue)
+        try {
+          for (const item of payment.items) {
+            const quantity = item.quantity || 1;
+            const unitPrice = item.unitPrice || item.price || 0;
+            await LiveEventProductMetrics.updateOne(
+              { event: payment.liveEvent, product: item.productId },
+              {
+                $inc: {
+                  purchases: quantity,
+                  revenue: unitPrice * quantity,
+                },
+              },
+              { upsert: true }
+            );
+          }
+
+          // Emitir actualización de métricas por Socket.IO
+          const io = req.app.get('io');
+          if (io) {
+            const productMetrics = await LiveEventProductMetrics.find({ event: payment.liveEvent }).populate('product', 'nombre precio productImages');
+            io.to(`event_${payment.liveEvent}`).emit('productMetricsUpdated', {
+              eventId: payment.liveEvent,
+              metrics: productMetrics,
+            });
+          }
+        } catch (e) {
+          console.warn('No se pudieron actualizar/emitar métricas de productos', e.message);
+        }
+      }
       if (paymentInfo.status.code === '2' || paymentInfo.status.code === '200') {
         console.log('=== BACKEND: Pago aprobado. Actualizando stock de productos... ===');
         for (const item of payment.items) {
@@ -330,6 +377,21 @@ const completeMockPayment = async (req, res) => {
       message: 'Pago mock completado exitosamente'
     }, 'Pago procesado exitosamente');
 
+    // Emitir métricas actualizadas por Socket.IO si corresponde
+    try {
+      if (payment.liveEvent) {
+        const io = req.app.get('io');
+        if (io) {
+          const productMetrics = await LiveEventProductMetrics.find({ event: payment.liveEvent }).populate('product', 'nombre precio productImages');
+          io.to(`event_${payment.liveEvent}`).emit('productMetricsUpdated', {
+            eventId: payment.liveEvent,
+            metrics: productMetrics,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('No se pudo emitir productMetricsUpdated después de pago mock', e.message);
+    }
   } catch (error) {
     console.error('Error al completar pago mock:', error);
     return errorResponse(res, 'Error al procesar el pago mock', 500, error.message);

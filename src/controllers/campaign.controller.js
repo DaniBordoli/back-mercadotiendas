@@ -21,6 +21,7 @@ exports.getAllCampaigns = async (req, res) => {
     
     const campaigns = await Campaign.find(filter)
       .populate('shop', 'name imageUrl subdomain')
+      .populate('products', 'categoria')
       .sort({ createdAt: -1 });
     
     res.status(200).json({
@@ -54,7 +55,8 @@ exports.getCampaignById = async (req, res) => {
     }
     
     const campaign = await Campaign.findById(id)
-      .populate('shop', 'name imageUrl subdomain contactEmail');
+      .populate('shop', 'name imageUrl subdomain contactEmail')
+      .populate('products', 'nombre productImages precio categoria sku');
     
     if (!campaign) {
       return res.status(404).json({
@@ -92,7 +94,7 @@ exports.createCampaign = async (req, res) => {
       });
     }
     
-    const { name, description, budget, imageUrl, endDate, status, category, requirements, products = [], milestones = [], kpis = {} } = req.body;
+    const { name, description, objectives, startDate, budget, imageUrl, endDate, status, category, requirements, products = [], milestones = [], kpis = {} } = req.body;
     
     // Verificar que el usuario tiene una tienda
     const user = await User.findById(req.user.id).populate('shop');
@@ -111,10 +113,12 @@ exports.createCampaign = async (req, res) => {
       shop: user.shop._id,
       budget,
       imageUrl,
+      startDate,
       endDate,
       status: status || 'draft',
       category,
       requirements,
+      objectives,
       products,
       milestones,
       kpis
@@ -145,7 +149,7 @@ exports.createCampaign = async (req, res) => {
 exports.updateCampaign = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, budget, imageUrl, endDate, status, category, requirements, products, milestones, kpis } = req.body;
+    const { name, description, objectives, startDate, budget, imageUrl, endDate, status, category, requirements, products, milestones, kpis } = req.body;
     
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -177,6 +181,8 @@ exports.updateCampaign = async (req, res) => {
     // Actualizar los campos
     campaign.name = name || campaign.name;
     campaign.description = description || campaign.description;
+    campaign.objectives = objectives || campaign.objectives;
+    campaign.startDate = startDate || campaign.startDate;
     campaign.budget = budget || campaign.budget;
     campaign.imageUrl = imageUrl || campaign.imageUrl;
     campaign.endDate = endDate || campaign.endDate;

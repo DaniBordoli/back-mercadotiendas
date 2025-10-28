@@ -18,7 +18,7 @@ exports.applyToCampaign = async (req, res) => {
     }
     
     const { campaignId } = req.params;
-    const { message, socialMediaLinks, proposedFee } = req.body;
+    const { message, socialMediaLinks = [], platforms = [], milestones = [], proposedFee, totalAmount } = req.body;
     
     if (!mongoose.Types.ObjectId.isValid(campaignId)) {
       return res.status(400).json({
@@ -64,13 +64,16 @@ exports.applyToCampaign = async (req, res) => {
       });
     }
     
-    // Crear la aplicación
+    // Crear la aplicación con todos los datos
     const application = new CampaignApplication({
       campaign: campaignId,
       user: req.user.id,
       message,
       socialMediaLinks,
-      proposedFee
+      platforms,
+      milestones,
+      proposedFee,
+      totalAmount
     });
     
     await application.save();

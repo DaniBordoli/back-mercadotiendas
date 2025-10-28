@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('../middlewares/auth');
-const { createProduct, updateProduct, deleteProduct, getProducts, getProductById, addProductImages, deleteProductImage, getAllProducts, getActiveProducts, getProductsByShop, getMyProducts } = require('../controllers/product.controller');
+const { createProduct, updateProduct, deleteProduct, getProducts, getProductById, getProductByIdPublic, getMonthlyVisits, addProductImages, deleteProductImage, getAllProducts, getActiveProducts, getProductsByShop, getMyProducts } = require('../controllers/product.controller');
 
 // Obtener productos
 router.get('/', getProducts);
@@ -17,8 +17,10 @@ router.get('/all', getAllProducts);
 
 // Obtener productos de una tienda específica (sin autenticación)
 router.get('/shop/:shopId', getProductsByShop);
-// Obtener producto por ID
-router.get('/:id', getProductById);
+// Obtener producto por ID (ruta pública y registra visita)
+router.get('/public/:id', getProductByIdPublic);
+// Obtener producto por ID (autenticado, para gestión)
+router.get('/:id', verifyToken, getProductById);
 
 // Crear producto
 router.post('/', verifyToken, createProduct);
@@ -36,5 +38,7 @@ router.post('/:id/images', verifyToken, addProductImages);
 router.delete('/:id/images', verifyToken, deleteProductImage);
 
 // Obtener todos los productos (sin autenticación)
+// Obtener visitas del mes para la tienda del usuario autenticado
+router.get('/my-products/visitas-mes', verifyToken, getMonthlyVisits);
 
 module.exports = router;

@@ -14,9 +14,8 @@ router.get('/:id', campaignController.getCampaignById);
 router.post('/', verifyToken, [
   check('name', 'El nombre es obligatorio').not().isEmpty(),
   check('description', 'La descripción es obligatoria').not().isEmpty(),
-  check('budget', 'El presupuesto es obligatorio').isNumeric(),
-  check('endDate', 'La fecha de finalización es obligatoria').isISO8601(),
-  check('category', 'La categoría es obligatoria').not().isEmpty()
+  check('objectives', 'Debes seleccionar al menos un objetivo').isArray({ min: 1 }),
+  check('startDate', 'La fecha de inicio es obligatoria').isISO8601(),
 ], function(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {

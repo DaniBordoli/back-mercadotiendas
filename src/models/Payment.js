@@ -49,8 +49,20 @@ const paymentSchema = new mongoose.Schema({
     },
     productImage: { // URL de la imagen principal del producto
       type: String
+    },
+    shopName: { // Nombre de la tienda a la que pertenece el producto
+      type: String,
+      required: true
     }
   }],
+  
+  // Evento en vivo asociado (opcional)
+  liveEvent: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'LiveEvent',
+    required: false,
+    index: true
+  },
   
   // Moneda del pago
   currency: {

@@ -10,6 +10,12 @@ const campaignSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  // Objetivos generales de la campaña (al menos uno)
+  objectives: {
+    type: [String],
+    required: true,
+    validate: v => Array.isArray(v) && v.length > 0
+  },
   shop: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Shop',
@@ -17,7 +23,7 @@ const campaignSchema = new mongoose.Schema({
   },
   budget: {
     type: Number,
-    required: true
+    required: false // Deja de ser obligatorio en el paso 1
   },
   imageUrl: {
     type: String,
@@ -25,11 +31,11 @@ const campaignSchema = new mongoose.Schema({
   },
   startDate: {
     type: Date,
-    default: Date.now
+    required: true // Ahora se exige fecha de inicio
   },
   endDate: {
     type: Date,
-    required: true
+    required: false // Opcional hasta paso posterior
   },
   status: {
     type: String,
@@ -38,7 +44,7 @@ const campaignSchema = new mongoose.Schema({
   },
   category: {
     type: String,
-    required: true
+    required: false // Opcional hasta paso posterior
   },
   requirements: {
     type: String,
@@ -56,6 +62,7 @@ const campaignSchema = new mongoose.Schema({
       name: { type: String, required: false },
       description: { type: String, required: false },
       date: { type: Date, required: false },
+      kpiKey: { type: String, required: false },
     },
   ],
   kpis: {

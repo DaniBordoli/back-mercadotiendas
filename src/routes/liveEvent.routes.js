@@ -8,6 +8,9 @@ const isInfluencer = require('../middlewares/isInfluencer');
 // GET /api/live-events - Obtener eventos
 router.get('/', verifyToken, isInfluencer, liveEventController.getLiveEvents);
 
+// GET /api/live-events/public - Obtener eventos publicados (público)
+router.get('/public', liveEventController.getPublicLiveEvents);
+
 // PUT /api/live-events/:id/highlight - Actualizar producto destacado (influencer autenticado)
 router.put('/:id/highlight', verifyToken, isInfluencer, liveEventController.updateHighlightedProduct);
 
@@ -19,6 +22,24 @@ router.delete('/:id', verifyToken, isInfluencer, liveEventController.deleteLiveE
 
 // PUT /api/live-events/:id - Actualizar evento (influencer autenticado)
 router.put('/:id', verifyToken, isInfluencer, liveEventController.updateLiveEvent);
+
+// GET /api/live-events/:id - Obtener un evento específico (influencer autenticado)
+router.get('/:id', verifyToken, isInfluencer, liveEventController.getLiveEvent);
+
+// GET /api/live-events/:id/metrics - Obtener métricas del evento (público)
+router.get('/:id/metrics', liveEventController.getMetrics);
+
+// GET /api/live-events/:id/product-metrics - Obtener métricas por producto destacado (público)
+router.get('/:id/product-metrics', liveEventController.getProductMetrics);
+
+// PATCH /api/live-events/:id/metrics - Actualizar métricas del evento (sin auth para permitir tracking)
+router.patch('/:id/metrics', liveEventController.updateMetrics);
+
+// POST /api/live-events/:id/viewers-snapshot - Registrar snapshot de espectadores (sin auth para tracking)
+router.post('/:id/viewers-snapshot', liveEventController.createViewerSnapshot);
+
+// GET /api/live-events/:id/viewer-series - Obtener serie de espectadores
+router.get('/:id/viewer-series', liveEventController.getViewerSeries);
 
 // POST /api/live-events - Crear un nuevo evento en vivo (influencer autenticado)
 router.post('/',
@@ -42,7 +63,6 @@ router.post('/',
   }
 );
 
-// GET /api/live-events/public - Obtener eventos publicados (público)
-router.get('/public', liveEventController.getPublicLiveEvents);
+
 
 module.exports = router;
