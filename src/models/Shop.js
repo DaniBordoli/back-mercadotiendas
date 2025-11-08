@@ -71,9 +71,18 @@ const shopSchema = new mongoose.Schema({
   imageUrl: {
     type: String
   },
+  // Contador de seguidores
+  followers: {
+    type: Number,
+    default: 0
+  },
   templateUpdate: {
-    type: Object,
-    default: {}
+    type: mongoose.Schema.Types.Mixed,
+    default: () => ({})
+  },
+  templateConfigurations: {
+    type: mongoose.Schema.Types.Mixed,
+    default: () => ({})
   },
   active: {
     type: Boolean,

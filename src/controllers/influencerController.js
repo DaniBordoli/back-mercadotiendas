@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const InfluencerProfile = require('../models/InfluencerProfile');
+const { refreshYouTubeSubscribers } = require('../services/youtube.service');
 const { validationResult } = require('express-validator');
 
 /**
@@ -208,6 +209,64 @@ exports.listInfluencerApplications = async (req, res) => {
       .sort({ createdAt: -1 });
     
     res.json(applications);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Error en el servidor');
+  }
+};
+
+/**
+ * @desc    Listar influencers aprobados
+ * @route   GET /api/influencers
+ * @access  Public
+ */
+exports.listInfluencers = async (req, res) => {
+  try {
+    /*
+      Ahora buscamos directamente en la colección `users` todos aquellos documentos cuyo
+      `userType` incluya "influencer" y que tengan definido un `influencerProfile`.
+      Esto permite listar a cualquier usuario que haya completado su perfil de influencer,
+      independientemente de un proceso de aprobación externo.
+    */
+
+    const users = await User.find({
+      userType: { $in: ['influencer'] },
+      influencerProfile: { $ne: null }
+    }).select('name fullName avatar influencerProfile');
+
+    // Mapeamos la respuesta para mantener la misma forma que el frontend espera
+    const influencers = users.map((u) => {
+    // Refrescar suscriptores de YouTube en segundo plano si procede
+    if (u.youtubeTokens) {
+      refreshYouTubeSubscribers(u._id).catch(()=>{});
+    }
+      const profile = u.influencerProfile || {};
+      // Extraemos las redes sociales (puede ser array o undefined)
+      const socialMedia = Array.isArray(profile.socialMedia) ? profile.socialMedia : [];
+
+      return {
+        _id: u._id,
+        name: u.name,
+        fullName: u.fullName,
+        avatar: u.avatar,
+        influencerProfile: {
+          niche: profile.niche,
+          niches: profile.niches,
+          category: profile.category,
+          bio: profile.bio,
+          biography: profile.biography,
+          username: profile.username || (socialMedia.length > 0 ? socialMedia[0].username : ''),
+          socialMedia: socialMedia,
+          instagram: profile.instagram,
+          tiktok: profile.tiktok,
+          youtube: profile.youtube,
+          stats: profile.stats,
+          engagementRate: profile.stats?.rating || 0
+        }
+      };
+    });
+
+    res.json(influencers);
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Error en el servidor');

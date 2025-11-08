@@ -169,6 +169,14 @@ exports.getApplicationById = async (req, res) => {
     const application = await CampaignApplication.findById(id)
       .populate('user', 'name email avatar')
       .populate('campaign');
+
+    // Obtener perfil de influencer y adjuntarlo al usuario
+    const InfluencerProfile = require('../models/InfluencerProfile');
+    const influencerProfile = await InfluencerProfile.findOne({ user: application.user._id });
+    if (influencerProfile) {
+      application.user = application.user.toObject();
+      application.user.influencerProfile = influencerProfile;
+    }
     
     if (!application) {
       return res.status(404).json({
@@ -222,7 +230,7 @@ exports.updateApplicationStatus = async (req, res) => {
       });
     }
     
-    if (!['accepted', 'rejected', 'pending'].includes(status)) {
+    if (!['accepted', 'rejected', 'pending', 'viewed'].includes(status)) {
       return res.status(400).json({
         success: false,
         message: 'Estado de aplicación inválido'
@@ -249,12 +257,15 @@ exports.updateApplicationStatus = async (req, res) => {
       });
     }
     
-    application.status = status;
-    await application.save();
+    // Actualizar solo el estado evitando que se re-validen otros campos (p.ej. hitos sin fecha)
+    const updatedApplication = await CampaignApplication.findByIdAndUpdate(id, { status }, {
+      new: true,
+      runValidators: false
+    });
     
     res.status(200).json({
       success: true,
-      data: application,
+      data: updatedApplication ?? application,
       message: `Estado de la aplicación actualizado a ${status}`
     });
   } catch (error) {

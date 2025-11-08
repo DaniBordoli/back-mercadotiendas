@@ -86,4 +86,11 @@ router.put('/admin/influencer/:id/reject',
   influencerController.rejectInfluencerApplication
 );
 
+/**
+ * @route GET /api/influencers
+ * @desc  Obtener listado público de influencers aprobados
+ * @access Public
+ */
+router.get('/influencers', influencerController.listInfluencers);
+
 module.exports = router;

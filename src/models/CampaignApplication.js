@@ -13,7 +13,7 @@ const campaignApplicationSchema = new mongoose.Schema({
   },
   message: {
     type: String,
-    required: true
+    required: false
   },
   socialMediaLinks: [{
     platform: {
@@ -40,9 +40,9 @@ const campaignApplicationSchema = new mongoose.Schema({
   // Arreglo de hitos propuestos por el influencer
   milestones: [{
     title: { type: String, required: true },
-    startDate: { type: Date, required: true },
-    endDate: { type: Date, required: true },
-    amount: { type: Number, required: true }
+    date: { type: Date, required: true },
+    amount: { type: Number, required: true },
+    notes: { type: String }
   }],
 
   // Monto total de la propuesta (suma de los hitos)
@@ -53,12 +53,17 @@ const campaignApplicationSchema = new mongoose.Schema({
 
   status: {
     type: String,
-    enum: ['pending', 'accepted', 'rejected'],
+    enum: ['pending', 'accepted', 'rejected', 'viewed'],
     default: 'pending'
   },
   proposedFee: {
     type: Number,
     required: false
+  },
+  currency: {
+    type: String,
+    enum: ['USD', 'ARS'],
+    default: 'ARS'
   },
   createdAt: {
     type: Date,

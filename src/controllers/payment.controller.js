@@ -44,25 +44,39 @@ const createOrderCheckout = async (req, res) => {
 
     const userId = req.user && req.user.id ? req.user.id : null;
 
-    // Obtener la tienda del usuario autenticado
-    const userShop = req.user && req.user.shop ? req.user.shop : null;
-    let shop = null;
-    if (userShop) {
-      shop = await Shop.findById(userShop);
-    }
-    if (!shop) {
-      return errorResponse(res, 'No se encontró la tienda asociada al usuario', 400);
+    // Obtener información de los productos y sus tiendas
+    const productIds = items.map((item) => item.productId);
+    const products = await require('../models/Products').find({ _id: { $in: productIds } }).populate('shop', 'name mobbexApiKey mobbexAccessToken');
+
+    if (!products || products.length === 0) {
+      return errorResponse(res, 'No se encontraron los productos especificados', 400);
     }
 
-    // Preparar ítems para guardar en la base de datos, incluyendo productId del frontend
-    const paymentItems = items.map(item => ({
-      productId: item.productId,
-      quantity: item.quantity,
-      unitPrice: item.price,
-      productName: item.name,
-      productImage: item.image,
-      shopName: shop.name // Guardamos el nombre de la tienda
-    }));
+    // Mapear productos para acceso rápido
+    const productMap = new Map();
+    products.forEach((product) => {
+      productMap.set(product._id.toString(), product);
+    });
+
+    // Preparar ítems, asignando shopName desde la tienda del producto
+    const paymentItems = items.map((item) => {
+      const prod = productMap.get(item.productId);
+      const shopName = prod && prod.shop ? prod.shop.name : 'Tienda no especificada';
+      return {
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: item.price,
+        productName: item.name,
+        productImage: item.image,
+        shopName,
+      };
+    });
+
+    // Seleccionar la tienda del primer producto para credenciales de pago (asumiendo un único owner)
+    const checkoutShop = products[0].shop;
+    if (!checkoutShop) {
+      return errorResponse(res, 'No se encontró la tienda asociada a los productos', 400);
+    }
 
     // Generar una referencia única para el pedido que se enviará a Mobbex
     orderData.reference = `order_${Date.now()}`;
@@ -71,9 +85,8 @@ const createOrderCheckout = async (req, res) => {
     console.log('=== BACKEND: Ítems enviados al servicio mock desde controller ===', JSON.stringify(items, null, 2));
     console.log('=== BACKEND: Llamando al servicio de pago mock ===');
     const checkoutResponse = await createCheckout(orderData, customerData, items, {
-      // Las credenciales no son necesarias para el mock, pero mantenemos la estructura
-      mobbexApiKey: shop.mobbexApiKey || 'mock_api_key',
-      mobbexAccessToken: shop.mobbexAccessToken || 'mock_access_token'
+      mobbexApiKey: checkoutShop.mobbexApiKey || 'mock_api_key',
+      mobbexAccessToken: checkoutShop.mobbexAccessToken || 'mock_access_token',
     });
 
     console.log('=== BACKEND: Respuesta del servicio mock ===');

@@ -32,6 +32,20 @@ setupStaticMiddleware(app);
 // Routes
 app.use('/api', routes);
 
+// Serve frontend build (SPA fallback)
+const frontendBuildPath = path.join(__dirname, '../../front-mercadotiendas/build');
+if (fs.existsSync(frontendBuildPath)) {
+  app.use(express.static(frontendBuildPath));
+
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
+      return next();
+    }
+
+    res.sendFile(path.join(frontendBuildPath, 'index.html'));
+  });
+}
+
 // 404 handler
 app.use(notFound);
 

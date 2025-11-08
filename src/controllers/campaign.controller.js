@@ -19,10 +19,37 @@ exports.getAllCampaigns = async (req, res) => {
     // Solo mostrar campañas activas por defecto
     if (!status) filter.status = 'active';
     
-    const campaigns = await Campaign.find(filter)
+    // Obtener campañas
+    let campaigns = await Campaign.find(filter)
       .populate('shop', 'name imageUrl subdomain')
       .populate('products', 'categoria')
       .sort({ createdAt: -1 });
+
+    /*
+      Asegurarnos de que el contador de postulaciones refleje el número real de documentos
+      en la colección CampaignApplication. Esto soluciona problemas cuando se eliminan
+      postulaciones directamente de la base de datos y el campo applicationsCount
+      queda desactualizado.
+    */
+    const { CampaignApplication } = require('../models');
+    campaigns = await Promise.all(
+      campaigns.map(async (c) => {
+        try {
+          const realCount = await CampaignApplication.countDocuments({ campaign: c._id });
+          // Solo actualizamos si el valor almacenado difiere del real
+          if (c.applicationsCount !== realCount) {
+            c.applicationsCount = realCount;
+            // Guardamos en segundo plano (no esperamos) para no impactar el tiempo de respuesta
+            c.save().catch((err) => console.error('Error al sincronizar applicationsCount', err));
+          }
+          // Devolvemos una copia plain para poder manipular libremente sin efectos colaterales
+          return c.toObject({ getters: true, virtuals: false });
+        } catch (e) {
+          console.error('Error contando aplicaciones para campaña', c._id, e);
+          return c;
+        }
+      })
+    );
     
     res.status(200).json({
       success: true,
@@ -54,7 +81,7 @@ exports.getCampaignById = async (req, res) => {
       });
     }
     
-    const campaign = await Campaign.findById(id)
+    let campaign = await Campaign.findById(id)
       .populate('shop', 'name imageUrl subdomain contactEmail')
       .populate('products', 'nombre productImages precio categoria sku');
     
@@ -65,6 +92,20 @@ exports.getCampaignById = async (req, res) => {
       });
     }
     
+    // Sincronizar contador de postulaciones con la realidad
+    try {
+      const { CampaignApplication } = require('../models');
+      const realCount = await CampaignApplication.countDocuments({ campaign: campaign._id });
+      if (campaign.applicationsCount !== realCount) {
+        campaign.applicationsCount = realCount;
+        await campaign.save();
+      }
+      // Convertimos a objeto plano para no exponer métodos ni generar problemas de mutabilidad
+      campaign = campaign.toObject({ getters: true, virtuals: false });
+    } catch (err) {
+      console.error('Error sincronizando applicationsCount en getCampaignById:', err);
+    }
+
     res.status(200).json({
       success: true,
       data: campaign
@@ -270,18 +311,35 @@ exports.deleteCampaign = async (req, res) => {
 exports.getCampaignsByShop = async (req, res) => {
   try {
     const { shopId } = req.params;
-    
+
     if (!mongoose.Types.ObjectId.isValid(shopId)) {
       return res.status(400).json({
         success: false,
         message: 'ID de tienda inválido'
       });
     }
-    
-    const campaigns = await Campaign.find({ shop: shopId })
-      .sort({ createdAt: -1 });
-    
-    res.status(200).json({
+
+    // Verificar que la tienda pertenece al usuario autenticado
+    try {
+      const user = await User.findById(req.user.id).populate('shop');
+      if (!user || !user.shop || !user.shop._id.equals(shopId)) {
+        return res.status(403).json({
+          success: false,
+          message: 'No tienes permiso para ver las campañas de esta tienda'
+        });
+      }
+    } catch (err) {
+      console.error('Error verificando la tienda del usuario:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Error al verificar permisos del usuario',
+        error: err.message
+      });
+    }
+
+    const campaigns = await Campaign.find({ shop: shopId }).sort({ createdAt: -1 });
+
+    return res.status(200).json({
       success: true,
       data: campaigns
     });

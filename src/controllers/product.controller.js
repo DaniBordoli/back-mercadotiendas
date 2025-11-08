@@ -188,7 +188,7 @@ exports.getMyProducts = async (req, res) => {
 exports.getProductById = async (req, res) => {
   try {
     const { id } = req.params;
-    const product = await Product.findById(id).populate('shop', 'name');
+    const product = await Product.findById(id).populate('shop', 'name imageUrl followers');
     if (!product) {
       return errorResponse(res, 'Producto no encontrado', 404);
     }

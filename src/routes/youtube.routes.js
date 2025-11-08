@@ -104,6 +104,46 @@ router.get('/channel', verifyToken, async (req, res) => {
       subscribers: channel.statistics?.subscriberCount
     };
 
+    // Actualizar la cantidad de suscriptores en el usuario e influencerProfile
+    try {
+      const user = await User.findById(req.user.id);
+      if (user) {
+        // Actualizar tokens
+        if (!user.youtubeTokens) user.youtubeTokens = {};
+        user.youtubeTokens.subscribers = Number(response.subscribers) || 0;
+
+        // Asegurarse de tener influencerProfile inicializado
+        if (user.influencerProfile) {
+          const socialMedia = Array.isArray(user.influencerProfile.socialMedia) ? user.influencerProfile.socialMedia : [];
+
+          // Encontrar o crear entrada de YouTube
+          const ytIndex = socialMedia.findIndex(sm => (sm.platform || '').toLowerCase() === 'youtube');
+          if (ytIndex !== -1) {
+            socialMedia[ytIndex].followers = Number(response.subscribers) || 0;
+          } else {
+            socialMedia.push({
+              platform: 'youtube',
+              username: response.title || 'youtube',
+              followers: Number(response.subscribers) || 0,
+              url: ''
+            });
+          }
+
+          // Recalcular totalFollowers
+          const totalFollowers = socialMedia.reduce((sum, sm) => sum + (Number(sm.followers) || 0), 0);
+          user.influencerProfile.socialMedia = socialMedia;
+
+          // Inicializar stats si no existe
+          user.influencerProfile.stats = user.influencerProfile.stats || {};
+          user.influencerProfile.stats.totalFollowers = totalFollowers;
+        }
+
+        await user.save();
+      }
+    } catch (saveErr) {
+      console.error('[YouTubeAuth] Error actualizando suscriptores en usuario', saveErr);
+    }
+
     return res.json({ success: true, channel: response });
   } catch (err) {
     console.error('[YouTubeAuth] Error obteniendo info de canal', err.response?.data || err.message);

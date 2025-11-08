@@ -104,7 +104,22 @@ const userSchema = new mongoose.Schema({
     type: [String],
     enum: ['buyer', 'seller', 'influencer'],
     default: ['buyer']
-  }
+  },
+  // Perfil de vendedor
+  sellerProfile: {
+    type: Object, // Puede contener storeName, phone, country, province, city, initialCategories, etc.
+    default: null,
+  },
+  // Perfil de influencer
+  influencerProfile: {
+    type: Object, // Puede contener username, social media, category, niches, etc.
+    default: null,
+  },
+  // Tiendas seguidas por el usuario
+  followingShops: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Shop',
+  }]
 });
 
 // Método para encriptar contraseña

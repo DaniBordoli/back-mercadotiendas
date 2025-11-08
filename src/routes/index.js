@@ -17,6 +17,7 @@ const campaignRoutes = require('./campaign.routes');
 const liveEventRoutes = require('./liveEvent.routes');
 const productQuestionRoutes = require('./productQuestion.routes');
 const campaignApplicationRoutes = require('./campaignApplication.routes');
+const campaignNotificationRoutes = require('./campaignNotification.routes');
 const uploadRoutes = require('./upload.routes');
 const influencerRoutes = require('./influencer');
 const tiktokAuthRoutes = require('./tiktok.routes');
@@ -75,6 +76,7 @@ router.use('/live-events', liveEventRoutes);
 
 // Rutas de aplicaciones a campañas (/api/applications/*)
 router.use('/applications', campaignApplicationRoutes);
+router.use('/campaign-notifications', campaignNotificationRoutes);
 
 // Rutas de carga de archivos (/api/uploads/*)
 router.use('/uploads', uploadRoutes);
