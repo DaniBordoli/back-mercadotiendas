@@ -327,6 +327,8 @@ exports.updateMetrics = async (req, res) => {
       cartAdds = 0,
       purchases = 0,
       salesAmount = 0,
+      likes = 0,
+      shares = 0,
       // Nuevos campos
       peakViewers,
       avgConcurrentViewers,
@@ -338,7 +340,7 @@ exports.updateMetrics = async (req, res) => {
     const update = {};
 
     // Incrementos acumulativos
-    const incFields = { uniqueViewers, productClicks, cartAdds, purchases, salesAmount };
+    const incFields = { uniqueViewers, productClicks, cartAdds, purchases, salesAmount, likes, shares };
     // Remover claves con incremento 0 para evitar crearlas innecesariamente
     Object.keys(incFields).forEach(key => {
       if (incFields[key] && incFields[key] !== 0) {
@@ -383,15 +385,20 @@ exports.updateMetrics = async (req, res) => {
       upsert: true,
     });
 
-    // Si se proporciona productId y cartAdds > 0, registrar también en métricas por producto
+    // Si se proporciona productId, registrar también en métricas por producto
     let updatedProductMetrics = null;
-    if (productId && cartAdds > 0) {
+    if (productId && (cartAdds > 0 || productClicks > 0)) {
       try {
-        updatedProductMetrics = await LiveEventProductMetrics.findOneAndUpdate(
-          { event: id, product: productId },
-          { $inc: { cartAdds } },
-          { new: true, upsert: true }
-        );
+        const productInc = {};
+        if (cartAdds > 0) productInc.cartAdds = cartAdds;
+        if (productClicks > 0) productInc.clicks = productClicks;
+        if (Object.keys(productInc).length > 0) {
+          updatedProductMetrics = await LiveEventProductMetrics.findOneAndUpdate(
+            { event: id, product: productId },
+            { $inc: productInc },
+            { new: true, upsert: true }
+          );
+        }
       } catch (pmErr) {
         console.error('Error actualizando cartAdds en LiveEventProductMetrics', pmErr);
       }

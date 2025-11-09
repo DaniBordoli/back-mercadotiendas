@@ -188,7 +188,7 @@ exports.getMyProducts = async (req, res) => {
 exports.getProductById = async (req, res) => {
   try {
     const { id } = req.params;
-    const product = await Product.findById(id).populate('shop', 'name imageUrl followers');
+    const product = await Product.findById(id).populate('shop', 'name imageUrl followers templateUpdate');
     if (!product) {
       return errorResponse(res, 'Producto no encontrado', 404);
     }
@@ -392,7 +392,7 @@ exports.deleteProductImage = async (req, res) => {
 // Obtener todos los productos (sin filtrar por tienda) - solo productos activos
 exports.getAllProducts = async (req, res) => {
   try {
-    const products = await Product.find({ estado: 'Activo' }).populate('shop', 'name');
+    const products = await Product.find({ estado: 'Activo' }).populate('shop', 'name imageUrl followers templateUpdate');
     return successResponse(res, products, 'Todos los productos obtenidos exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al obtener todos los productos', 500, error.message);

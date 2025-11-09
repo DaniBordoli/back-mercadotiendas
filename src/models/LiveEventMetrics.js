@@ -28,6 +28,16 @@ const liveEventMetricsSchema = new mongoose.Schema(
       type: Number,
       default: 0
     },
+    // Número total de "me gusta" recibidos durante la transmisión
+    likes: {
+      type: Number,
+      default: 0,
+    },
+    // Número total de veces que se compartió el evento
+    shares: {
+      type: Number,
+      default: 0,
+    },
     // Máximo número de espectadores concurrentes alcanzado durante la transmisión
     peakViewers: {
       type: Number,

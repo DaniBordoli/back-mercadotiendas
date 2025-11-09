@@ -9,6 +9,7 @@ const LiveEvent = require('./LiveEvent');
 const ProductVisit = require('./ProductVisit');
 const LiveEventMetrics = require('./LiveEventMetrics');
 const LiveEventProductMetrics = require('./LiveEventProductMetrics');
+const ProductReview = require('./ProductReview');
 
 module.exports = {
   User,
@@ -21,6 +22,7 @@ module.exports = {
   LiveEvent,
   ProductVisit,
   LiveEventMetrics,
-  LiveEventProductMetrics
+  LiveEventProductMetrics,
+  ProductReview
 };
 

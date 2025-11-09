@@ -16,6 +16,7 @@ const shopInstitutionalRoutes = require('./shopInstitutional.routes');
 const campaignRoutes = require('./campaign.routes');
 const liveEventRoutes = require('./liveEvent.routes');
 const productQuestionRoutes = require('./productQuestion.routes');
+const productReviewRoutes = require('./productReview.routes');
 const campaignApplicationRoutes = require('./campaignApplication.routes');
 const campaignNotificationRoutes = require('./campaignNotification.routes');
 const uploadRoutes = require('./upload.routes');
@@ -33,6 +34,8 @@ router.use('/auth/youtube', youtubeAuthRoutes);
 router.use('/users', userRoutes);
 // Rutas de preguntas de producto
 router.use('/product-questions', productQuestionRoutes);
+// Rutas de reseñas de producto
+router.use('/product-reviews', productReviewRoutes);
 
 // Rutas de tienda (/api/shops/*)
 router.use('/shops', shopRoutes);

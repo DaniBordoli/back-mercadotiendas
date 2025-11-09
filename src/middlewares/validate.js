@@ -29,7 +29,7 @@ const validationRules = {
         return true;
       })
   ],
-  
+
   
   // Validación para crear checkout de Mobbex
   createCheckout: [
@@ -95,6 +95,22 @@ const validationRules = {
     body('items.*.description')
       .optional()
       .isString().withMessage('La descripción debe ser un texto')
+  ],
+
+  // Validación para crear una reseña de producto
+  createReview: [
+    body('productId')
+      .trim()
+      .notEmpty().withMessage('El ID de producto es requerido')
+      .isMongoId().withMessage('ID de producto inválido'),
+    body('comment')
+      .trim()
+      .notEmpty().withMessage('El comentario es requerido')
+      .isString().withMessage('El comentario debe ser un texto')
+      .isLength({ min: 1, max: 1000 }).withMessage('El comentario debe tener entre 1 y 1000 caracteres'),
+    body('rating')
+      .notEmpty().withMessage('La calificación es requerida')
+      .isInt({ min: 1, max: 5 }).withMessage('La calificación debe ser un entero entre 1 y 5')
   ],
 
   login: [

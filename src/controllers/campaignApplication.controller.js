@@ -189,9 +189,9 @@ exports.getApplicationById = async (req, res) => {
     const user = await User.findById(req.user.id).populate('shop');
     const campaign = await Campaign.findById(application.campaign);
     
-    const isApplicant = application.user._id.equals(req.user.id);
-    const isShopOwner = user.shop && campaign.shop.equals(user.shop._id);
-    
+    const isApplicant = application.user.equals(req.user.id);
+    const isShopOwner = user.shop && campaign && campaign.shop && campaign.shop.equals(user.shop._id);
+
     if (!isApplicant && !isShopOwner) {
       return res.status(403).json({
         success: false,
@@ -304,6 +304,71 @@ exports.getUserApplications = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error al obtener las aplicaciones del usuario',
+      error: error.message
+    });
+  }
+};
+
+exports.deleteApplication = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'ID de aplicación inválido'
+      });
+    }
+
+    const application = await CampaignApplication.findById(id);
+
+    if (!application) {
+      return res.status(404).json({
+        success: false,
+        message: 'Aplicación no encontrada'
+      });
+    }
+
+    // Verificar permisos: solicitante o dueño de la campaña
+    const user = await User.findById(req.user.id).populate('shop');
+    const campaign = await Campaign.findById(application.campaign);
+
+    const isApplicant = application.user.equals(req.user.id);
+    const isShopOwner = user.shop && campaign && campaign.shop && campaign.shop.equals(user.shop._id);
+
+    if (!isApplicant && !isShopOwner) {
+      return res.status(403).json({
+        success: false,
+        message: 'No tienes permiso para eliminar esta aplicación'
+      });
+    }
+
+    await CampaignApplication.findByIdAndDelete(id);
+
+    // Actualizar contador de aplicaciones en la campaña
+    await Campaign.findByIdAndUpdate(application.campaign, { $inc: { applicationsCount: -1 } }).catch(console.error);
+
+    // Actualizar stats del perfil de influencer, si existe
+    try {
+      const InfluencerProfile = require('../models/InfluencerProfile');
+      const influencerProfile = await InfluencerProfile.findOne({ user: application.user });
+      if (influencerProfile) {
+        influencerProfile.stats.totalApplications = Math.max(0, (influencerProfile.stats.totalApplications || 1) - 1);
+        await influencerProfile.save();
+      }
+    } catch (err) {
+      console.error('Error actualizando stats de influencer al eliminar aplicación', err);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Aplicación eliminada correctamente'
+    });
+  } catch (error) {
+    console.error('Error al eliminar aplicación:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al eliminar la aplicación',
       error: error.message
     });
   }

@@ -31,4 +31,7 @@ router.patch('/:id/status', verifyToken, campaignApplicationController.updateApp
 // GET /api/applications/user/me - Obtener todas las aplicaciones del usuario actual (requiere autenticación)
 router.get('/user/me', verifyToken, campaignApplicationController.getUserApplications);
 
+// DELETE /api/applications/:id - Eliminar una aplicación (dueño o solicitante)
+router.delete('/:id', verifyToken, campaignApplicationController.deleteApplication);
+
 module.exports = router;
