@@ -51,16 +51,17 @@ exports.applyToCampaign = async (req, res) => {
       });
     }
     
-    // Verificar si el usuario ya ha aplicado a esta campaña
-    const existingApplication = await CampaignApplication.findOne({
+    // Verificar si el usuario tiene una aplicación vigente (pending o accepted) para esta campaña
+    const existingActiveApplication = await CampaignApplication.findOne({
       campaign: campaignId,
-      user: req.user.id
+      user: req.user.id,
+      status: { $in: ['pending', 'accepted'] }
     });
-    
-    if (existingApplication) {
+
+    if (existingActiveApplication) {
       return res.status(400).json({
         success: false,
-        message: 'Ya has aplicado a esta campaña'
+        message: 'Ya tienes una postulación en curso o aceptada para esta campaña'
       });
     }
     
@@ -288,10 +289,16 @@ exports.getUserApplications = async (req, res) => {
     const applications = await CampaignApplication.find({ user: req.user.id })
       .populate({
         path: 'campaign',
-        populate: {
-          path: 'shop',
-          select: 'name imageUrl subdomain'
-        }
+        populate: [
+          {
+            path: 'shop',
+            select: 'name imageUrl subdomain'
+          },
+          {
+            path: 'products',
+            select: 'nombre productImages precio'
+          }
+        ]
       })
       .sort({ createdAt: -1 });
     

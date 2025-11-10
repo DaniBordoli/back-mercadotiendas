@@ -21,7 +21,27 @@ router.get('/:id/highlight', liveEventController.getHighlightedProduct);
 router.delete('/:id', verifyToken, isInfluencer, liveEventController.deleteLiveEvent);
 
 // PUT /api/live-events/:id - Actualizar evento (influencer autenticado)
-router.put('/:id', verifyToken, isInfluencer, liveEventController.updateLiveEvent);
+router.put('/:id',
+  verifyToken,
+  isInfluencer,
+  [
+    check('title').optional().isLength({ max: 120 }).withMessage('Máximo 120 caracteres'),
+    check('description').optional().isLength({ max: 500 }).withMessage('Máximo 500 caracteres'),
+    check('date').optional().isISO8601(),
+    check('time').optional().matches(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
+    check('status').optional().isIn(['draft', 'published', 'live', 'finished']),
+    check('campaign').optional().isMongoId(),
+    check('products').optional().isArray(),
+    check('socialAccounts').optional().isArray(),
+  ],
+  (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+    liveEventController.updateLiveEvent(req, res);
+  }
+);
 
 // GET /api/live-events/:id - Obtener un evento específico (influencer autenticado)
 router.get('/:id', verifyToken, isInfluencer, liveEventController.getLiveEvent);
@@ -51,6 +71,7 @@ router.post('/',
     check('date', 'La fecha es obligatoria').isISO8601(),
     check('time', 'La hora es obligatoria').matches(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
     check('status').optional().isIn(['draft', 'published']),
+    check('campaign').optional().isMongoId(),
     check('products').optional().isArray(),
     check('socialAccounts').optional().isArray()
   ],

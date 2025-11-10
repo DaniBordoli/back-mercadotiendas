@@ -38,6 +38,12 @@ const liveEventSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
+    // Vinculación opcional a una campaña activa
+    campaign: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Campaign',
+      default: null,
+    },
     products: [{
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Product',

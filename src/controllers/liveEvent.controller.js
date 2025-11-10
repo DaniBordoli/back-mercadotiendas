@@ -14,7 +14,8 @@ exports.createLiveEvent = async (req, res) => {
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
-    const { title, description, date, time, status, products = [], socialAccounts = [], youtubeVideoId } = req.body;
+    // In createLiveEvent, after destructuring req.body
+    const { title, description, date, time, status, products = [], socialAccounts = [], youtubeVideoId, campaign } = req.body;
 
     // Combinar fecha y hora en un solo Date ISO
     const startDateTime = new Date(`${date}T${time}:00Z`);
@@ -38,6 +39,7 @@ exports.createLiveEvent = async (req, res) => {
       owner: user._id,
       products,
       socialAccounts,
+      campaign,
       youtubeVideoId,
     });
 
@@ -225,6 +227,7 @@ exports.updateLiveEvent = async (req, res) => {
     }
     if (products !== undefined) event.products = products;
     if (socialAccounts !== undefined) event.socialAccounts = socialAccounts;
+    if (campaign !== undefined) event.campaign = campaign;
     if (youtubeVideoId !== undefined) event.youtubeVideoId = youtubeVideoId;
 
     await event.save();

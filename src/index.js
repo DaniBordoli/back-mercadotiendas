@@ -5,6 +5,7 @@ const { config } = require('./config');
 const fs = require('fs');
 const https = require('https');
 const path = require('path');
+const mongoose = require('mongoose');
 const connectDB = require('./config/database');
 const routes = require('./routes');
 const { errorHandler, notFound } = require('./middlewares/error');
@@ -19,6 +20,22 @@ app.get('/', (req, res) => {
 
 // Conectar a MongoDB
 connectDB();
+
+// --- Migración de índice: eliminar índice único (campaign + user) en CampaignApplication ---
+// Permite re-postular cuando la previa fue "rejected". Ejecuta una sola vez tras la conexión.
+mongoose.connection.once('open', async () => {
+  try {
+    const { CampaignApplication } = require('./models');
+    const indexes = await CampaignApplication.collection.indexes();
+    const hasUnique = indexes.some((ix) => ix.name === 'campaign_1_user_1' && ix.unique);
+    if (hasUnique) {
+      await CampaignApplication.collection.dropIndex('campaign_1_user_1');
+      console.log('🔧 Eliminado índice único campaign_1_user_1 en CampaignApplication');
+    }
+  } catch (err) {
+    console.warn('No se pudo eliminar el índice campaign_1_user_1:', err.message);
+  }
+});
 
 // Middlewares
 app.use(cors());

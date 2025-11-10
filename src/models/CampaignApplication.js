@@ -81,7 +81,7 @@ campaignApplicationSchema.pre('save', function(next) {
   next();
 });
 
-// Índice compuesto para evitar múltiples aplicaciones del mismo usuario a la misma campaña
-campaignApplicationSchema.index({ campaign: 1, user: 1 }, { unique: true });
+// Nota: Se elimina el índice único compuesto (campaign + user) para permitir
+// re-postulaciones en campañas cuando la aplicación previa fue rechazada.
 
 module.exports = mongoose.model('CampaignApplication', campaignApplicationSchema);
