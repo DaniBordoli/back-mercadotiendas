@@ -7,7 +7,7 @@ const { validationResult } = require('express-validator');
  * @param {Object} req - Request object
  * @param {Object} res - Response object
  */
-exports.applyToCampaign = async (req, res) => {
+exports.applyToCampaign = async (req, res, next) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -19,7 +19,31 @@ exports.applyToCampaign = async (req, res) => {
     
     const { campaignId } = req.params;
     const { message, socialMediaLinks = [], platforms = [], milestones = [], proposedFee, totalAmount } = req.body;
-    
+
+    // Validación de hitos
+    if (!Array.isArray(milestones) || milestones.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Debes incluir al menos un hito en tu propuesta'
+      });
+    }
+
+    for (const [index, m] of milestones.entries()) {
+      if (!m.title || !m.date || m.amount === undefined) {
+        return res.status(400).json({
+          success: false,
+          message: `El hito #${index + 1} debe incluir título, fecha y monto`
+        });
+      }
+      const amountNum = Number(m.amount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: `El monto del hito #${index + 1} debe ser mayor a 0`
+        });
+      }
+    }
+
     if (!mongoose.Types.ObjectId.isValid(campaignId)) {
       return res.status(400).json({
         success: false,
@@ -43,7 +67,20 @@ exports.applyToCampaign = async (req, res) => {
         message: 'No se puede aplicar a una campaña que no está activa'
       });
     }
-    
+
+    // Validar fechas de hitos dentro del rango de la campaña
+    const campaignStart = new Date(campaign.startDate);
+    const campaignEnd = new Date(campaign.endDate);
+    for (const [index, m] of milestones.entries()) {
+      const milestoneDate = new Date(m.date);
+      if (milestoneDate < campaignStart || milestoneDate > campaignEnd) {
+        return res.status(400).json({
+          success: false,
+          message: `La fecha del hito #${index + 1} debe estar dentro del rango de la campaña`
+        });
+      }
+    }
+
     if (new Date() > new Date(campaign.endDate)) {
       return res.status(400).json({
         success: false,
@@ -215,6 +252,64 @@ exports.getApplicationById = async (req, res) => {
 };
 
 /**
+ * Guardar o actualizar un borrador de aplicación a una campaña
+ * @param {Object} req - Request object
+ * @param {Object} res - Response object
+ */
+exports.saveDraftApplication = async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    const { campaignId } = req.params;
+    const { message, socialMediaLinks = [], platforms = [], milestones = [], proposedFee, totalAmount } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(campaignId)) {
+      return res.status(400).json({ success: false, message: 'ID de campaña inválido' });
+    }
+
+    const campaign = await Campaign.findById(campaignId);
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: 'Campaña no encontrada' });
+    }
+
+    // Buscar borrador existente del usuario para esta campaña
+    let draft = await CampaignApplication.findOne({ campaign: campaignId, user: req.user.id, status: 'draft' });
+
+    if (draft) {
+      // Actualizar borrador existente
+      draft.message = message;
+      draft.socialMediaLinks = socialMediaLinks;
+      draft.platforms = platforms;
+      draft.milestones = milestones;
+      draft.proposedFee = proposedFee;
+      draft.totalAmount = totalAmount;
+      await draft.save();
+    } else {
+      draft = new CampaignApplication({
+        campaign: campaignId,
+        user: req.user.id,
+        message,
+        socialMediaLinks,
+        platforms,
+        milestones,
+        proposedFee,
+        totalAmount,
+        status: 'draft'
+      });
+      await draft.save();
+    }
+
+    return res.status(200).json({ success: true, data: draft, message: 'Borrador guardado' });
+  } catch (error) {
+    console.error('Error al guardar borrador de aplicación:', error);
+    return res.status(500).json({ success: false, message: 'Error al guardar borrador', error: error.message });
+  }
+};
+
+/**
  * Actualizar el estado de una aplicación (aceptar/rechazar)
  * @param {Object} req - Request object
  * @param {Object} res - Response object
@@ -222,51 +317,88 @@ exports.getApplicationById = async (req, res) => {
 exports.updateApplicationStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
-    
+    const { status, reason } = req.body;
+
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
         message: 'ID de aplicación inválido'
       });
     }
-    
-    if (!['accepted', 'rejected', 'pending', 'viewed'].includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Estado de aplicación inválido'
-      });
-    }
-    
+
     const application = await CampaignApplication.findById(id);
-    
     if (!application) {
       return res.status(404).json({
         success: false,
         message: 'Aplicación no encontrada'
       });
     }
-    
-    // Verificar que el usuario es el dueño de la tienda que creó la campaña
-    const user = await User.findById(req.user.id).populate('shop');
+
     const campaign = await Campaign.findById(application.campaign);
-    
-    if (!user.shop || !campaign.shop.equals(user.shop._id)) {
-      return res.status(403).json({
+
+    if (!['accepted', 'rejected', 'pending', 'viewed'].includes(status)) {
+      return res.status(400).json({
         success: false,
-        message: 'No tienes permiso para actualizar esta aplicación'
+        message: 'Estado inválido'
       });
     }
-    
-    // Actualizar solo el estado evitando que se re-validen otros campos (p.ej. hitos sin fecha)
-    const updatedApplication = await CampaignApplication.findByIdAndUpdate(id, { status }, {
+
+    if (application.status === status) {
+      return res.status(200).json({
+        success: true,
+        data: application,
+        message: `La aplicación ya se encuentra en estado ${status}`
+      });
+    }
+
+    if (['accepted', 'rejected'].includes(status) && !['pending', 'viewed'].includes(application.status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'La aplicación ya fue decidida anteriormente'
+      });
+    }
+
+    const updatePayload = {
+      status,
+      decidedAt: new Date(),
+      decidedBy: req.user.id
+    };
+
+    if (status === 'rejected') {
+      updatePayload.rejectReason = reason || null;
+    }
+
+    if (status === 'accepted') {
+      updatePayload.isLocked = true;
+    }
+
+    const updatedApplication = await CampaignApplication.findByIdAndUpdate(id, updatePayload, {
       new: true,
       runValidators: false
     });
-    
+
+    if (status === 'accepted' && campaign && campaign.exclusive === true) {
+      await CampaignApplication.updateMany(
+        {
+          _id: { $ne: id },
+          campaign: campaign._id,
+          status: { $in: ['pending', 'viewed'] }
+        },
+        {
+          $set: {
+            status: 'rejected',
+            decidedAt: new Date(),
+            decidedBy: req.user.id,
+            rejectReason: 'La campaña fue cerrada a otra propuesta',
+            isLocked: true
+          }
+        }
+      ).catch(console.error);
+    }
+
     res.status(200).json({
       success: true,
-      data: updatedApplication ?? application,
+      data: updatedApplication,
       message: `Estado de la aplicación actualizado a ${status}`
     });
   } catch (error) {
@@ -378,5 +510,120 @@ exports.deleteApplication = async (req, res) => {
       message: 'Error al eliminar la aplicación',
       error: error.message
     });
+  }
+};
+
+/**
+ * Enviar un hito por parte del influencer
+ * Requiere que la aplicación esté en estado 'accepted'
+ * Actualiza el hito a 'submitted' y marca submittedAt
+ */
+exports.submitMilestone = async (req, res) => {
+  try {
+    const { appId, milestoneId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(appId) || !mongoose.Types.ObjectId.isValid(milestoneId)) {
+      return res.status(400).json({ success: false, message: 'IDs inválidos' });
+    }
+
+    const application = await CampaignApplication.findById(appId);
+    if (!application) {
+      return res.status(404).json({ success: false, message: 'Aplicación no encontrada' });
+    }
+
+    const isApplicant = application.user.equals(req.user.id);
+    if (!isApplicant) {
+      return res.status(403).json({ success: false, message: 'No tienes permiso para enviar este hito' });
+    }
+
+    if (application.status !== 'accepted') {
+      return res.status(400).json({ success: false, message: 'La aplicación debe estar aceptada para enviar hitos' });
+    }
+
+    const milestone = application.milestones.id(milestoneId);
+    if (!milestone) {
+      return res.status(404).json({ success: false, message: 'Hito no encontrado' });
+    }
+
+    if (['approved'].includes(milestone.status)) {
+      return res.status(400).json({ success: false, message: 'Este hito ya fue aprobado' });
+    }
+
+    // Idempotencia básica: si ya está submitted, devolver sin error
+    if (milestone.status === 'submitted') {
+      return res.status(200).json({ success: true, data: application, message: 'El hito ya fue entregado' });
+    }
+
+    milestone.status = 'submitted';
+    milestone.submittedAt = new Date();
+    milestone.reviewNotes = null;
+
+    await application.save();
+
+    return res.status(200).json({ success: true, data: application, message: 'Hito entregado correctamente' });
+  } catch (error) {
+    console.error('Error al enviar hito:', error);
+    return res.status(500).json({ success: false, message: 'Error al enviar el hito', error: error.message });
+  }
+};
+
+/**
+ * Revisar un hito por parte del dueño de la tienda
+ * Permite aprobar o rechazar un hito. Si todos quedan aprobados, la aplicación pasa a 'completed'.
+ */
+exports.reviewMilestone = async (req, res) => {
+  try {
+    const { appId, milestoneId } = req.params;
+    const { status, reviewNotes } = req.body || {};
+
+    if (!mongoose.Types.ObjectId.isValid(appId) || !mongoose.Types.ObjectId.isValid(milestoneId)) {
+      return res.status(400).json({ success: false, message: 'IDs inválidos' });
+    }
+
+    const application = await CampaignApplication.findById(appId).populate('campaign');
+    if (!application) {
+      return res.status(404).json({ success: false, message: 'Aplicación no encontrada' });
+    }
+
+    const user = await User.findById(req.user.id).populate('shop');
+    const campaign = await Campaign.findById(application.campaign._id);
+    const isShopOwner = user.shop && campaign && campaign.shop && campaign.shop.equals(user.shop._id);
+    if (!isShopOwner) {
+      return res.status(403).json({ success: false, message: 'No tienes permiso para revisar hitos de esta campaña' });
+    }
+
+    if (application.status !== 'accepted') {
+      return res.status(400).json({ success: false, message: 'Solo se pueden revisar hitos de aplicaciones aceptadas' });
+    }
+
+    if (!['approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Estado de revisión inválido' });
+    }
+
+    const milestone = application.milestones.id(milestoneId);
+    if (!milestone) {
+      return res.status(404).json({ success: false, message: 'Hito no encontrado' });
+    }
+
+    milestone.status = status;
+    milestone.reviewNotes = status === 'rejected' ? (reviewNotes || '') : null;
+
+    await application.save();
+
+    // Si el hito fue aprobado, verificar completitud
+    if (status === 'approved') {
+      const allApproved = application.milestones.every((m) => m.status === 'approved');
+      if (allApproved) {
+        application.status = 'completed';
+        application.decidedAt = new Date();
+        application.decidedBy = req.user.id;
+        await application.save();
+      }
+    }
+
+    return res.status(200).json({ success: true, data: application, message: `Hito ${status === 'approved' ? 'aprobado' : 'rechazado'} correctamente` });
+  } catch (error) {
+    console.error('Error al revisar hito:', error);
+    return res.status(500).json({ success: false, message: 'Error al revisar el hito', error: error.message });
   }
 };

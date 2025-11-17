@@ -29,7 +29,7 @@ exports.verifyFirebaseToken = async (req, res) => {
         country: customUserData?.country,
         firebaseId: decodedToken.uid,
         isActivated: disableEmailVerification ? true : decodedToken.email_verified, // Auto-activate if bypass is enabled
-        role: 'user'
+        userType: ['buyer']
       };
       
       // Solo agregamos el código de activación si el email no está verificado y el bypass no está activo
@@ -109,7 +109,7 @@ exports.verifyFirebaseToken = async (req, res) => {
       id: user._id,
       email: user.email,
       name: user.name,
-      role: user.role
+      userType: user.userType
     });
 
     const userResponse = {
@@ -121,7 +121,7 @@ exports.verifyFirebaseToken = async (req, res) => {
       city: user.city,
       province: user.province,
       country: user.country,
-      role: user.role,
+      userType: user.userType,
       isActivated: user.isActivated,
       shop: user.shop
     };

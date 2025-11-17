@@ -34,4 +34,24 @@ router.get('/user/me', verifyToken, campaignApplicationController.getUserApplica
 // DELETE /api/applications/:id - Eliminar una aplicación (dueño o solicitante)
 router.delete('/:id', verifyToken, campaignApplicationController.deleteApplication);
 
+// POST /api/applications/campaign/:campaignId/draft - Guardar borrador de aplicación (requiere autenticación)
+router.post('/campaign/:campaignId/draft', verifyToken, [
+  check('socialMediaLinks').optional().isArray(),
+  check('platforms').optional().isArray(),
+  check('milestones').optional().isArray(),
+  check('totalAmount').optional().isNumeric()
+], (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+  campaignApplicationController.saveDraftApplication(req, res);
+});
+
+// POST /api/applications/:appId/milestone/:milestoneId/submit - Enviar hito (requiere autenticación, rol influencer)
+router.post('/:appId/milestone/:milestoneId/submit', verifyToken, campaignApplicationController.submitMilestone);
+
+// POST /api/applications/:appId/milestone/:milestoneId/review - Revisar hito (requiere autenticación, rol vendedor)
+router.post('/:appId/milestone/:milestoneId/review', verifyToken, campaignApplicationController.reviewMilestone);
+
 module.exports = router;

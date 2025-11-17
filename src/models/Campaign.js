@@ -95,6 +95,11 @@ const campaignSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  // Indica si la campaña aceptará solo una postulación (exclusiva)
+  exclusive: {
+    type: Boolean,
+    default: false
+  },
   createdAt: {
     type: Date,
     default: Date.now

@@ -31,7 +31,8 @@ exports.createProduct = (req, res) => {
     }
 
     try {
-      const { nombre, descripcion, sku, estado, precio, oldPrice, discount, categoria, stock, subcategoria, codigoBarras, tieneVariantes } = req.body;
+      const { nombre, descripcion, sku, estado, precio, oldPrice, discount, categoria, stock, subcategoria, codigoBarras, tieneVariantes, largoCm, anchoCm, altoCm, pesoKg, customAttributes } = req.body;
+      let parsedCustomAttributes = customAttributes;
       
       // Procesar variantes
       let variantes = req.body.variantes;
@@ -54,6 +55,27 @@ exports.createProduct = (req, res) => {
         }
       }
       if (!Array.isArray(combinacionesVariantes)) combinacionesVariantes = [];
+
+      // Procesar atributos personalizados
+      if (typeof parsedCustomAttributes === 'string') {
+        try {
+          parsedCustomAttributes = JSON.parse(parsedCustomAttributes);
+        } catch {
+          parsedCustomAttributes = [];
+        }
+      }
+      if (!Array.isArray(parsedCustomAttributes)) parsedCustomAttributes = [];
+
+      // Convertir dimensiones y peso a números
+      const numLargo = Number(largoCm);
+      const numAncho = Number(anchoCm);
+      const numAlto = Number(altoCm);
+      const numPeso = Number(pesoKg);
+
+      // Validar que sean números válidos y no negativos
+      if ([numLargo, numAncho, numAlto, numPeso].some(v => isNaN(v) || v < 0)) {
+        return errorResponse(res, 'Las dimensiones y el peso deben ser números válidos y no negativos', 400);
+      }
 
       console.log('[createProduct] req.files:', req.files); // <-- Depuración
       
@@ -111,6 +133,11 @@ exports.createProduct = (req, res) => {
         variantes,
         tieneVariantes: tieneVariantes === 'true' || tieneVariantes === true,
         combinacionesVariantes,
+        largoCm: numLargo,
+        anchoCm: numAncho,
+        altoCm: numAlto,
+        pesoKg: numPeso,
+        customAttributes: parsedCustomAttributes,
         stock: Number(stock), // Convertir stock a Number
         codigoBarras: codigoBarras || '', // Agregar código de barras
         shop: user.shop 
@@ -188,7 +215,7 @@ exports.getMyProducts = async (req, res) => {
 exports.getProductById = async (req, res) => {
   try {
     const { id } = req.params;
-    const product = await Product.findById(id).populate('shop', 'name imageUrl followers templateUpdate');
+    const product = await Product.findById(id).populate('shop', 'name imageUrl followers templateUpdate owner');
     if (!product) {
       return errorResponse(res, 'Producto no encontrado', 404);
     }
@@ -232,7 +259,8 @@ exports.updateProduct = async (req, res) => {
       return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
     }
     // Solo permitir los campos editables
-    const allowedFields = ['nombre', 'sku', 'descripcion', 'precio', 'oldPrice', 'discount', 'stock', 'categoria', 'subcategoria', 'estado', 'productImages', 'variantes', 'codigoBarras'];
+    const allowedFields = ['nombre', 'sku', 'descripcion', 'precio', 'oldPrice', 'discount', 'stock', 'categoria', 'subcategoria', 'estado', 'productImages', 'variantes', 'codigoBarras', 'largoCm', 'anchoCm', 'altoCm', 'pesoKg', 'customAttributes'];
+    const numericFields = ['stock', 'largoCm', 'anchoCm', 'altoCm', 'pesoKg'];
     const updates = {};
     allowedFields.forEach(field => {
       if (req.body[field] !== undefined) {
@@ -244,8 +272,15 @@ exports.updateProduct = async (req, res) => {
           }
           if (!Array.isArray(value)) value = [];
           updates[field] = value;
-        } else if (field === 'stock') { // Asegurar que el stock se convierta a número
+        } else if (numericFields.includes(field)) { // Convertir campos numéricos a Number
           updates[field] = Number(req.body[field]);
+        } else if (field === 'customAttributes') {
+          let value = req.body[field];
+          if (typeof value === 'string') {
+            try { value = JSON.parse(value); } catch { value = []; }
+          }
+          if (!Array.isArray(value)) value = [];
+          updates[field] = value;
         } else {
           updates[field] = req.body[field];
         }

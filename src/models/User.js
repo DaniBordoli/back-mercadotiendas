@@ -69,11 +69,11 @@ const userSchema = new mongoose.Schema({
     type: Object, // Contendrá country, province, city, postalCode, streetAndNumber, role
     default: null
   },
-  role: {
-    type: String,
-    enum: ['admin', 'user'],
-    default: 'user',
-  },
+  // role: {
+  //   type: String,
+  //   enum: ['admin', 'user'],
+  //   default: 'user',
+  // },
   resetPasswordToken: String,
   resetPasswordExpires: Date,
   shop: {
@@ -96,13 +96,9 @@ const userSchema = new mongoose.Schema({
     type: Object, // Almacena access_token, refresh_token, scope, expiry_date, etc.
     default: null
   },
-  isInfluencer: {
-    type: Boolean,
-    default: false
-  },
   userType: {
     type: [String],
-    enum: ['buyer', 'seller', 'influencer'],
+    enum: ['buyer', 'seller', 'influencer', 'admin'],
     default: ['buyer']
   },
   // Perfil de vendedor

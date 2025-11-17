@@ -61,6 +61,13 @@ router.post('/:id/viewers-snapshot', liveEventController.createViewerSnapshot);
 // GET /api/live-events/:id/viewer-series - Obtener serie de espectadores
 router.get('/:id/viewer-series', liveEventController.getViewerSeries);
 
+// Aggregated dashboard endpoints
+router.get('/summary', verifyToken, isInfluencer, liveEventController.getAggregatedSummary);
+router.get('/funnel', verifyToken, isInfluencer, liveEventController.getAggregatedFunnel);
+router.get('/audience-series', verifyToken, isInfluencer, liveEventController.getAggregatedAudienceSeries);
+// GET /api/live-events/campaign-summary - Resumen de ingresos por campaña
+router.get('/campaign-summary', verifyToken, isInfluencer, liveEventController.getCampaignSummary);
+
 // POST /api/live-events - Crear un nuevo evento en vivo (influencer autenticado)
 router.post('/',
   verifyToken,

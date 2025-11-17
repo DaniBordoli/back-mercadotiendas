@@ -35,23 +35,30 @@ exports.getCampaignNotifications = async (req, res) => {
       let title;
       let description;
 
-      switch (app.status) {
-        case 'pending':
-          type = 'offer';
-          title = `Nueva oferta en "${campaignMap.get(app.campaign.toString())}"`;
-          description = `${app.user.name} envió una propuesta`;
-          break;
-        case 'accepted':
+      if (app.status === 'completed') {
+        type = 'campaign';
+        title = `Postulación completada en "${campaignMap.get(app.campaign.toString())}"`;
+        description = `Todos los hitos de ${app.user.name} fueron aprobados`;
+      } else if (app.status === 'pending') {
+        type = 'offer';
+        title = `Nueva oferta en "${campaignMap.get(app.campaign.toString())}"`;
+        description = `${app.user.name} envió una propuesta`;
+      } else if (app.status === 'accepted') {
+        const submittedCount = (app.milestones || []).filter((m) => m.status === 'submitted').length;
+        if (submittedCount > 0) {
+          type = 'milestone';
+          title = `Nuevo hito entregado (${submittedCount}) en "${campaignMap.get(app.campaign.toString())}"`;
+          description = `${app.user.name} entregó ${submittedCount} hito(s)`;
+        } else {
           title = `Oferta aceptada en "${campaignMap.get(app.campaign.toString())}"`;
           description = `Has aceptado la propuesta de ${app.user.name}`;
-          break;
-        case 'rejected':
-          title = `Oferta rechazada en "${campaignMap.get(app.campaign.toString())}"`;
-          description = `Has rechazado la propuesta de ${app.user.name}`;
-          break;
-        default:
-          title = `Actualización en "${campaignMap.get(app.campaign.toString())}"`;
-          description = `Propuesta de ${app.user.name}`;
+        }
+      } else if (app.status === 'rejected') {
+        title = `Oferta rechazada en "${campaignMap.get(app.campaign.toString())}"`;
+        description = `Has rechazado la propuesta de ${app.user.name}` + (app.rejectReason ? ` – Motivo: ${app.rejectReason}` : '');
+      } else {
+        title = `Actualización en "${campaignMap.get(app.campaign.toString())}"`;
+        description = `Propuesta de ${app.user.name}`;
       }
 
       return {
@@ -61,7 +68,7 @@ exports.getCampaignNotifications = async (req, res) => {
         amount: app.totalAmount ? `$${app.totalAmount.toFixed(2)}` : '$0.00',
         milestones: app.milestones ? app.milestones.length : 0,
         time: app.updatedAt,
-        isRead: false, // TODO: almacenar estado leído/ no leído en el futuro
+        isRead: false,
         campaignName: campaignMap.get(app.campaign.toString()),
         influencerName: app.user.name,
         type

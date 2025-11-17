@@ -145,8 +145,10 @@ exports.approveInfluencerApplication = async (req, res) => {
     // Actualizar usuario
     const user = await User.findById(influencerProfile.user);
     if (user) {
-      user.isInfluencer = true;
-      await user.save();
+      if (!user.userType.includes('influencer')) {
+        user.userType.push('influencer');
+        await user.save();
+      }
     }
 
     res.json({

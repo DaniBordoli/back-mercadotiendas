@@ -20,13 +20,34 @@ const liveEventMetricsSchema = new mongoose.Schema(
       type: Number,
       default: 0
     },
+    // Total de visualizaciones (no únicas) durante la transmisión
+    views: {
+      type: Number,
+      default: 0,
+    },
+    // Ventas directas (checkout completado)
+    directSales: {
+      type: Number,
+      default: 0,
+    },
     purchases: {
       type: Number,
-      default: 0
+      default: 0,
     },
+    // Ingresos totales generados durante la transmisión (equivale a KPI "revenue")
+    revenue: {
+      type: Number,
+      default: 0,
+    },
+    // Tasa de clics (CTR) calculada o actualizada periódicamente
+    ctr: {
+      type: Number,
+      default: 0,
+    },
+    // Campo legado (opcional) mantenido para compatibilidad; se puede deprecar más adelante
     salesAmount: {
       type: Number,
-      default: 0
+      default: 0,
     },
     // Número total de "me gusta" recibidos durante la transmisión
     likes: {
@@ -35,6 +56,15 @@ const liveEventMetricsSchema = new mongoose.Schema(
     },
     // Número total de veces que se compartió el evento
     shares: {
+      type: Number,
+      default: 0,
+    },
+    // Número total de comentarios recibidos durante la transmisión
+    comments: {
+      type: Number,
+      default: 0,
+    },
+    newFollowers: {
       type: Number,
       default: 0,
     },
@@ -52,7 +82,32 @@ const liveEventMetricsSchema = new mongoose.Schema(
     durationSeconds: {
       type: Number,
       default: 0,
-    }
+    },
+    // Feed de actividad en vivo: guarda los últimos eventos relevantes
+    activityFeed: [
+      {
+        type: {
+          type: String,
+          enum: [
+            'viewer', // nuevo espectador
+            'click', // clic en producto
+            'cartAdd', // producto añadido al carrito
+            'sale', // venta realizada
+            'milestone', // milestone alcanzado
+            'other', // genérico
+          ],
+          required: true,
+        },
+        message: {
+          type: String,
+          required: true,
+        },
+        ts: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
   },
   {
     timestamps: true

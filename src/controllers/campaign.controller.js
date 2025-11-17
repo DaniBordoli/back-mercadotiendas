@@ -9,21 +9,31 @@ const { validationResult } = require('express-validator');
  */
 exports.getAllCampaigns = async (req, res) => {
   try {
-    const { status, category } = req.query;
-    
+    const { status, category, limit: limitQuery, offset: offsetQuery } = req.query;
+
     // Construir el filtro basado en los parámetros de consulta
     const filter = {};
     if (status) filter.status = status;
     if (category) filter.category = category;
-    
+
     // Solo mostrar campañas activas por defecto
     if (!status) filter.status = 'active';
-    
-    // Obtener campañas
+
+    // Paginación (limit y offset)
+    const DEFAULT_LIMIT = 20;
+    const limit = Math.max(parseInt(limitQuery, 10) || DEFAULT_LIMIT, 1);
+    const offset = Math.max(parseInt(offsetQuery, 10) || 0, 0);
+
+    // Contar total de campañas que cumplen el filtro (sin paginación)
+    const totalCount = await Campaign.countDocuments(filter);
+
+    // Obtener campañas con paginación
     let campaigns = await Campaign.find(filter)
       .populate('shop', 'name imageUrl subdomain')
       .populate('products', 'categoria')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .skip(offset)
+      .limit(limit);
 
     /*
       Asegurarnos de que el contador de postulaciones refleje el número real de documentos
@@ -50,10 +60,13 @@ exports.getAllCampaigns = async (req, res) => {
         }
       })
     );
-    
+
     res.status(200).json({
       success: true,
-      data: campaigns
+      data: campaigns,
+      totalCount,
+      limit,
+      offset
     });
   } catch (error) {
     console.error('Error al obtener campañas:', error);
@@ -135,7 +148,7 @@ exports.createCampaign = async (req, res) => {
       });
     }
     
-    const { name, description, objectives, startDate, budget, imageUrl, endDate, status, category, requirements, products = [], milestones = [], kpis = {} } = req.body;
+    const { name, description, objectives, startDate, budget, imageUrl, endDate, status, category, requirements, products = [], milestones = [], kpis = {}, exclusive } = req.body;
     
     // Verificar que el usuario tiene una tienda
     const user = await User.findById(req.user.id).populate('shop');
@@ -162,7 +175,8 @@ exports.createCampaign = async (req, res) => {
       objectives,
       products,
       milestones,
-      kpis
+      kpis,
+      exclusive: exclusive === true
     });
     
     await campaign.save();
@@ -190,7 +204,7 @@ exports.createCampaign = async (req, res) => {
 exports.updateCampaign = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, objectives, startDate, budget, imageUrl, endDate, status, category, requirements, products, milestones, kpis } = req.body;
+    const { name, description, objectives, startDate, budget, imageUrl, endDate, status, category, requirements, products, milestones, kpis, exclusive } = req.body;
     
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -233,6 +247,7 @@ exports.updateCampaign = async (req, res) => {
     if (products !== undefined) campaign.products = products;
     if (milestones !== undefined) campaign.milestones = milestones;
     if (kpis !== undefined) campaign.kpis = kpis;
+    if (exclusive !== undefined) campaign.exclusive = exclusive;
     
     await campaign.save();
     

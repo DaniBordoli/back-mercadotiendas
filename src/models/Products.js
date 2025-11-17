@@ -35,6 +35,38 @@ const productSchema = new mongoose.Schema({
   stock: {
     type: Number
   },
+  // Especificaciones obligatorias
+  largoCm: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  anchoCm: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  altoCm: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  pesoKg: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  // Atributos personalizados opcionales
+  customAttributes: [{
+    nombre: {
+      type: String,
+      trim: true
+    },
+    valor: {
+      type: String,
+      trim: true
+    }
+  }],
   categoria: {
     type: String
   },
