@@ -1,5 +1,6 @@
 const ProductQuestion = require('../models/ProductQuestion');
 const { successResponse, errorResponse } = require('../utils/response');
+const { emitNotification } = require('../utils/notification');
 const Product = require('../models/Products');
 
 // Create a new question
@@ -19,6 +20,29 @@ exports.createQuestion = async (req, res) => {
     });
 
     await newQuestion.save();
+
+    // Notificar al dueño de la tienda sobre la nueva pregunta
+    try {
+      const io = req.app.get('io');
+      const product = await Product.findById(productId).populate('shop');
+      if (
+        io &&
+        product &&
+        product.shop &&
+        product.shop.owner &&
+        product.shop.owner.toString() !== userId
+      ) {
+        await emitNotification(io, product.shop.owner, {
+          type: 'product_question',
+          title: 'Nueva pregunta sobre tu producto',
+          message: `Han realizado una pregunta sobre tu producto ${product.name}`,
+          entity: 'product_question',
+          data: { productId, questionId: newQuestion._id },
+        });
+      }
+    } catch (notifyErr) {
+      console.error('Error enviando notificación de nueva pregunta:', notifyErr);
+    }
 
     return successResponse(res, {
       message: 'Pregunta creada exitosamente',
@@ -105,6 +129,22 @@ exports.answerQuestion = async (req, res) => {
     question.answer = answer.trim();
     question.answeredAt = new Date();
     await question.save();
+
+    // Notificar al autor de la pregunta sobre la respuesta
+    try {
+      const io = req.app.get('io');
+      if (io && question.userId.toString() !== user._id.toString()) {
+        await emitNotification(io, question.userId, {
+          type: 'question_answer',
+          title: 'Tu pregunta ha sido respondida',
+          message: 'El vendedor ha respondido tu pregunta sobre el producto.',
+          entity: 'product_question',
+          data: { questionId: question._id, productId: question.productId },
+        });
+      }
+    } catch (notifyErr) {
+      console.error('Error enviando notificación de respuesta de pregunta:', notifyErr);
+    }
 
     return successResponse(res, { question }, 'Respuesta enviada exitosamente');
   } catch (err) {

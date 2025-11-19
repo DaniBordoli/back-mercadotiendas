@@ -76,7 +76,58 @@ const sendActivationCodeEmail = async (email, activationCode) => {
   }
 };
 
+const sendSupportTicketEmail = async ({ to, subject, html, text, attachments = [] }) => {
+  const mailOptions = {
+    from: `"MercadoTiendas" <${config.emailService.user}>`,
+    to: to || process.env.SUPPORT_MAIL || config.emailService.user,
+    subject,
+    html,
+    text,
+    attachments
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+  } catch (error) {
+    console.error('Error sending support ticket email:', error);
+    throw new Error('Error al enviar el ticket de soporte');
+  }
+};
+
+// Envía un correo de acuse de recibo al usuario cuando se crea un ticket de soporte
+const sendSupportAckEmail = async ({ to, ticketId }) => {
+  if (!to) return; // si no hay correo de destino se omite el envío
+
+  const subject = `[SUPPORT][RECIBIDO] ${ticketId}`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
+      <h2 style="color:#1c1c1e">¡Hemos recibido tu solicitud!</h2>
+      <p>Gracias por contactarnos. Tu ID de referencia es <strong>${ticketId}</strong>.</p>
+      <p>Nuestro equipo la revisará y te responderá a la brevedad.</p>
+      <div style="text-align: center; margin-top: 20px; color: #888; font-size: 12px;">
+        <p>MercadoTiendas &copy; 2025</p>
+      </div>
+    </div>`;
+
+  try {
+    await transporter.sendMail({
+      from: `"MercadoTiendas" <${config.emailService.user}>`,
+      to,
+      subject,
+      html
+    });
+  } catch (error) {
+    console.error('Error sending support ack email:', error);
+  }
+};
+
 module.exports = {
   sendResetPasswordEmail,
-  sendActivationCodeEmail
+  sendActivationCodeEmail,
+  sendSupportTicketEmail,
+  sendSupportAckEmail,
+
+  sendResetPasswordEmail,
+  sendActivationCodeEmail,
+  sendSupportTicketEmail
 };

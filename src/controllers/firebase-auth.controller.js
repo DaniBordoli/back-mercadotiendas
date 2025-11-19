@@ -1,6 +1,6 @@
 const admin = require('../config/firebase');
 const User = require('../models/User');
-const { generateToken } = require('../utils/jwt');
+const { generateToken, generateRefreshToken, generateAccessToken } = require('../utils/jwt');
 const { successResponse, errorResponse } = require('../utils/response');
 const { sendActivationCodeEmail } = require('../services/email.service');
 const disableEmailVerification = process.env.DISABLE_EMAIL_VERIFICATION === 'true';
@@ -105,6 +105,20 @@ exports.verifyFirebaseToken = async (req, res) => {
       await user.save();
     }
 
+    // Generar tokens de acceso y refresco
+    const accessToken = generateAccessToken({
+      id: user._id,
+      email: user.email,
+      name: user.name,
+      userType: user.userType
+    });
+    const refreshToken = generateRefreshToken({ id: user._id });
+
+    // Almacenar refreshToken en el usuario
+    user.refreshToken = refreshToken;
+    await user.save();
+
+    // Token de un día para operaciones no críticas (opcional)
     const jwtToken = generateToken({
       id: user._id,
       email: user.email,
@@ -129,7 +143,8 @@ exports.verifyFirebaseToken = async (req, res) => {
     return successResponse(res, {
       message: 'Autenticación exitosa',
       user: userResponse,
-      token: jwtToken
+      token: accessToken,
+      refreshToken
     });
 
   } catch (err) {

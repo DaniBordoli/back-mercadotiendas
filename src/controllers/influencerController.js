@@ -268,6 +268,13 @@ exports.listInfluencers = async (req, res) => {
       };
     });
 
+    // Ordenar por rating descendente (los de mayor reputación primero)
+    influencers.sort((a, b) => {
+      const ratingA = a.influencerProfile?.stats?.rating ?? 0;
+      const ratingB = b.influencerProfile?.stats?.rating ?? 0;
+      return ratingB - ratingA;
+    });
+
     res.json(influencers);
   } catch (err) {
     console.error(err.message);

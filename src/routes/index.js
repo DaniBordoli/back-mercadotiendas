@@ -19,7 +19,9 @@ const productQuestionRoutes = require('./productQuestion.routes');
 const productReviewRoutes = require('./productReview.routes');
 const campaignApplicationRoutes = require('./campaignApplication.routes');
 const campaignNotificationRoutes = require('./campaignNotification.routes');
+const notificationRoutes = require('./notification.routes');
 const uploadRoutes = require('./upload.routes');
+const supportRoutes = require('./support.routes');
 const influencerRoutes = require('./influencer');
 const tiktokAuthRoutes = require('./tiktok.routes');
 const youtubeAuthRoutes = require('./youtube.routes');
@@ -36,6 +38,9 @@ router.use('/users', userRoutes);
 router.use('/product-questions', productQuestionRoutes);
 // Rutas de reseñas de producto
 router.use('/product-reviews', productReviewRoutes);
+// Rutas de reseñas de influencers
+const influencerReviewRoutes = require('./influencerReview.routes');
+router.use('/influencer-reviews', influencerReviewRoutes);
 
 // Rutas de tienda (/api/shops/*)
 router.use('/shops', shopRoutes);
@@ -80,9 +85,14 @@ router.use('/live-events', liveEventRoutes);
 // Rutas de aplicaciones a campañas (/api/applications/*)
 router.use('/applications', campaignApplicationRoutes);
 router.use('/campaign-notifications', campaignNotificationRoutes);
+// Rutas de notificaciones (/api/notifications/*)
+router.use('/notifications', notificationRoutes);
 
 // Rutas de carga de archivos (/api/uploads/*)
 router.use('/uploads', uploadRoutes);
+
+// Rutas de soporte (/api/support/*)
+router.use('/support', supportRoutes);
 
 // Rutas de influencer (/api/users/* y /api/admin/influencer/*)
 router.use('/', influencerRoutes);

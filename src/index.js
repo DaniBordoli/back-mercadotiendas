@@ -203,6 +203,17 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Permite que el cliente se una a su sala personal de usuario para recibir notificaciones en tiempo real
+  // El frontend debe emitir 'joinUserRoom' con el userId después de autenticarse
+  socket.on('joinUserRoom', (userId) => {
+    if (userId) {
+      socket.join(`user_${userId}`);
+      socket.data = socket.data || {};
+      socket.data.joinedUserId = userId;
+      console.log(`Socket ${socket.id} joined user room user_${userId}`);
+    }
+  });
+
   socket.on('disconnect', async () => {
     console.log('Cliente Socket.IO desconectado:', socket.id);
     const eventId = socket.data?.joinedEventId;

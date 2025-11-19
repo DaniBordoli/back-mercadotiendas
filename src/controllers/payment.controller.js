@@ -5,6 +5,8 @@ const { successResponse, errorResponse } = require('../utils/response');
 const Payment = require('../models/Payment');
 const Shop = require('../models/Shop');
 const { updateProductStock } = require('./product.controller'); // Importar la función de stock
+const { emitNotification } = require('../utils/notification');
+const ProductModel = require('../models/Products');
 const axios = require('axios');
 // const mobbexConfig = require('../config/mobbex'); // No necesario para mock
 const LiveEventMetrics = require('../models/LiveEventMetrics');
@@ -109,6 +111,32 @@ const createOrderCheckout = async (req, res) => {
       });
       await newPayment.save();
       console.log('=== BACKEND: Registro de pago creado exitosamente en DB local con MockId:', newPayment._id, '===');
+
+      // Emitir notificación al vendedor sobre la nueva orden
+      try {
+        const io = req.app.get('io');
+        if (io && checkoutShop.owner) {
+          await emitNotification(io, checkoutShop.owner, {
+            type: 'order',
+            title: 'Nueva orden recibida',
+            message: `Se ha creado la orden ${orderData.reference}`,
+            entity: 'order',
+            data: { paymentId: newPayment._id, reference: orderData.reference },
+          });
+        }
+        // Notificar también al comprador si está autenticado
+        if (io && userId) {
+          await emitNotification(io, userId, {
+            type: 'order',
+            title: 'Orden creada',
+            message: `Tu orden ${orderData.reference} ha sido creada exitosamente`,
+            entity: 'order',
+            data: { paymentId: newPayment._id, reference: orderData.reference },
+          });
+        }
+      } catch (notifyErr) {
+        console.error('Error al emitir notificación de nueva orden:', notifyErr);
+      }
     } else {
       console.error('=== BACKEND: Error al obtener ID del mock para el checkout ===');
       throw new Error('Error al crear el checkout de pago con el servicio mock.');
@@ -246,6 +274,33 @@ const handleWebhook = async (req, res) => {
         for (const item of payment.items) {
           console.log(`=== BACKEND: Item para actualizar stock - Product ID: ${item.productId}, Quantity: ${item.quantity} ===`); // Nuevo log
           await updateProductStock(item.productId, item.quantity);
+        }
+        // Emitir notificaciones de pago aprobado
+        try {
+          const io = req.app.get('io');
+          if (io) {
+            // Notificar al comprador
+            await emitNotification(io, payment.user, {
+              type: 'payment',
+              title: 'Pago aprobado',
+              message: `Tu pago para la orden ${payment.reference} ha sido acreditado exitosamente`,
+              entity: 'payment',
+              data: { paymentId: payment._id, amount: payment.amount },
+            });
+            // Obtener vendedor (dueño de la tienda del primer producto)
+            const firstProduct = await ProductModel.findById(payment.items[0].productId).populate('shop', 'owner');
+            if (firstProduct && firstProduct.shop && firstProduct.shop.owner) {
+              await emitNotification(io, firstProduct.shop.owner, {
+                type: 'payment',
+                title: 'Pago recibido',
+                message: `Has recibido un pago por la orden ${payment.reference}`,
+                entity: 'payment',
+                data: { paymentId: payment._id, amount: payment.amount },
+              });
+            }
+          }
+        } catch (notifErr) {
+          console.error('Error al emitir notificación de pago aprobado:', notifErr);
         }
       } else if (paymentInfo.status.code === '3' || paymentInfo.status.code === '4' || paymentInfo.status.code === '400') {
         console.log('=== BACKEND: Pago rechazado/cancelado. No se actualiza el stock. ===');

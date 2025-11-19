@@ -1,4 +1,5 @@
 const { ProductReview, Products, Shop } = require('../models');
+const { emitNotification } = require('../utils/notification');
 const { successResponse, errorResponse } = require('../utils/response');
 
 // Crear una nueva reseña
@@ -17,6 +18,23 @@ const createReview = async (req, res) => {
 
     await review.save();
     await review.populate('userId', 'fullName name');
+
+    // Emitir notificación al dueño de la tienda si no es el autor de la reseña
+    try {
+      const io = req.app.get('io');
+      const product = await Products.findById(productId).populate('shop');
+      if (io && product && product.shop && product.shop.owner && product.shop.owner.toString() !== userId) {
+        await emitNotification(io, product.shop.owner, {
+          type: 'review',
+          title: 'Nueva reseña recibida',
+          message: `Tu producto ${product.name} ha recibido una nueva reseña`,
+          entity: 'product',
+          data: { productId, reviewId: review._id },
+        });
+      }
+    } catch (notifyErr) {
+      console.error('Error enviando notificación de nueva reseña:', notifyErr);
+    }
 
     // Crear respuesta con userName para compatibilidad con frontend
     const reviewResponse = {
@@ -165,6 +183,23 @@ const replyReview = async (req, res) => {
 
     await review.save();
     await review.populate('reply.userId', 'fullName name');
+
+    // Notificar al autor de la reseña si no es el mismo que responde
+    try {
+      const io = req.app.get('io');
+      if (io && review.userId.toString() !== userId) {
+        const productName = product?.name || 'tu producto';
+        await emitNotification(io, review.userId, {
+          type: 'review_reply',
+          title: 'Respuesta a tu reseña',
+          message: `El vendedor respondió tu reseña en ${productName}`,
+          entity: 'review',
+          data: { reviewId: review._id, productId: product._id },
+        });
+      }
+    } catch (notifyErr) {
+      console.error('Error enviando notificación de respuesta de reseña:', notifyErr);
+    }
 
     successResponse(res, review.reply, 'Respuesta registrada exitosamente');
   } catch (error) {
