@@ -2,6 +2,7 @@ const { Campaign, CampaignApplication, User } = require('../models');
 const InfluencerReview = require('../models/InfluencerReview');
 const mongoose = require('mongoose');
 const { successResponse, errorResponse } = require('../utils/response');
+const reviewCtrl = require('./influencerReview.controller');
 
 // Ventana de calificación: 15 días posteriores a la fecha de fin
 const WINDOW_DAYS = 15;
@@ -46,6 +47,25 @@ exports.isRateable = async (req, res) => {
     return successResponse(res, { isRateable: true });
   } catch (err) {
     console.error('Error isRateable:', err);
+    return errorResponse(res, 'Error interno', 500);
+  }
+};
+
+exports.createRating = async (req, res) => {
+  try {
+    const { campaignId, influencerId } = req.params;
+
+    // Pasar IDs al cuerpo para que createReview los use
+    req.body = {
+      ...req.body,
+      campaignId,
+      influencerId,
+    };
+
+    // Delegar creación a createReview
+    return await reviewCtrl.createReview(req, res);
+  } catch (err) {
+    console.error('Error createRating:', err);
     return errorResponse(res, 'Error interno', 500);
   }
 };

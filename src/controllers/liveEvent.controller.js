@@ -1,6 +1,8 @@
 const { validationResult } = require('express-validator');
 const mongoose = require('mongoose');
 const { LiveEvent, User, LiveEventMetrics, LiveEventProductMetrics } = require('../models');
+const NotificationService = require('../services/notification.service');
+const { NotificationTypes } = require('../constants/notificationTypes');
 const LiveEventViewerSnapshot = require('../models/LiveEventViewerSnapshot');
 
 /**
@@ -192,17 +194,20 @@ exports.updateHighlightedProduct = async (req, res) => {
       event.highlightedProduct = productId;
       await event.save({ session });
 
-      // Emitir evento Socket.IO
+      // Emitir notificación y persistir historial
       try {
         const io = req.app.get('io');
-        if (io) {
-          io.to(`event_${event._id}`).emit('highlightChanged', {
-            eventId: event._id,
-            productId,
-          });
-        }
+        const prodDoc = await require('../models/Products').findById(productId).select('name');
+        await NotificationService.emitAndPersist(io, {
+          users: [event.owner],
+          type: NotificationTypes.LIVE_HIGHLIGHT,
+          title: 'Producto Destacado',
+          message: 'Se ha destacado un nuevo producto en el evento.',
+          entity: event._id,
+          data: { eventId: event._id, productId, highlighted: true, eventTitle: event.title || '', productName: prodDoc?.name || '' },
+        });
       } catch (emitErr) {
-        console.warn('No se pudo emitir highlightChanged', emitErr.message);
+        console.warn('Error emitiendo highlight notification', emitErr.message);
       }
 
       res.json({ success: true, highlightedProduct: productId });

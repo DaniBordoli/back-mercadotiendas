@@ -1,5 +1,7 @@
 const User = require('../models/User');
 const InfluencerProfile = require('../models/InfluencerProfile');
+const LiveEvent = require('../models/LiveEvent');
+const LiveEventMetrics = require('../models/LiveEventMetrics');
 const { refreshYouTubeSubscribers } = require('../services/youtube.service');
 const { validationResult } = require('express-validator');
 
@@ -251,6 +253,7 @@ exports.listInfluencers = async (req, res) => {
         name: u.name,
         fullName: u.fullName,
         avatar: u.avatar,
+        youtubeConnected: Boolean(u.youtubeTokens),
         influencerProfile: {
           niche: profile.niche,
           niches: profile.niches,
@@ -279,5 +282,73 @@ exports.listInfluencers = async (req, res) => {
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Error en el servidor');
+  }
+};
+
+/**
+ * @desc    Métricas públicas agregadas del influencer (últimos eventos)
+ * @route   GET /api/influencers/:id/metrics
+ * @access  Public
+ */
+exports.getInfluencerPublicMetrics = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findById(id).select('_id influencerProfile');
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+    }
+
+    const events = await LiveEvent.find({ owner: id })
+      .sort({ startDateTime: -1 })
+      .limit(5)
+      .select('_id status');
+
+    const eventIds = events.map((e) => e._id);
+    const metricsDocs = eventIds.length
+      ? await LiveEventMetrics.find({ event: { $in: eventIds } })
+      : [];
+
+    let averageViews = 0;
+    let engagementRate = 0;
+
+    if (metricsDocs.length) {
+      const viewers = metricsDocs
+        .map((m) => Number(m.uniqueViewers || m.avgConcurrentViewers || 0))
+        .filter((n) => !isNaN(n) && n > 0);
+      if (viewers.length) {
+        averageViews = Math.round(viewers.reduce((a, b) => a + b, 0) / viewers.length);
+      }
+
+      const ratios = metricsDocs
+        .map((m) => {
+          const base = Number(m.uniqueViewers || m.avgConcurrentViewers || 0);
+          const interactions = Number(m.likes || 0) + Number(m.comments || 0) + Number(m.shares || 0);
+          if (!base || isNaN(base) || base <= 0) return 0;
+          return (interactions / base) * 100;
+        })
+        .filter((r) => r > 0);
+      if (ratios.length) {
+        engagementRate = Number((ratios.reduce((a, b) => a + b, 0) / ratios.length).toFixed(1));
+      }
+    }
+
+    const profile = user.influencerProfile || {};
+    const stats = profile.stats || {};
+
+    if (!averageViews) {
+      averageViews = Number(stats.averageViews || profile.averageViews || profile.avgViews || 0) || 0;
+    }
+    if (!engagementRate) {
+      const er = stats.engagementRate || profile.engagementRate;
+      if (er !== undefined && er !== null) {
+        engagementRate = Number(er) || 0;
+      }
+    }
+
+    return res.json({ success: true, data: { averageViews, engagementRate } });
+  } catch (err) {
+    console.error('Error obteniendo métricas públicas de influencer:', err);
+    return res.status(500).json({ success: false, message: 'Error en el servidor', error: err.message });
   }
 };

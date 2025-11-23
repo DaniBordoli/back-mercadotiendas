@@ -5,7 +5,8 @@ const { successResponse, errorResponse } = require('../utils/response');
 const Payment = require('../models/Payment');
 const Shop = require('../models/Shop');
 const { updateProductStock } = require('./product.controller'); // Importar la función de stock
-const { emitNotification } = require('../utils/notification');
+const NotificationService = require('../services/notification.service');
+const { NotificationTypes } = require('../constants/notificationTypes');
 const ProductModel = require('../models/Products');
 const axios = require('axios');
 // const mobbexConfig = require('../config/mobbex'); // No necesario para mock
@@ -280,22 +281,40 @@ const handleWebhook = async (req, res) => {
           const io = req.app.get('io');
           if (io) {
             // Notificar al comprador
-            await emitNotification(io, payment.user, {
-              type: 'payment',
+            await NotificationService.emitAndPersist(io, {
+              users: [payment.user],
+              type: NotificationTypes.PAYMENT,
               title: 'Pago aprobado',
               message: `Tu pago para la orden ${payment.reference} ha sido acreditado exitosamente`,
-              entity: 'payment',
-              data: { paymentId: payment._id, amount: payment.amount },
+              entity: payment._id,
+              data: {
+                reference: payment.reference,
+                amount: payment.amount,
+                items: (payment.items || []).map(i => ({
+                  productName: i.productName,
+                  quantity: i.quantity,
+                  shopName: i.shopName
+                }))
+              },
             });
             // Obtener vendedor (dueño de la tienda del primer producto)
             const firstProduct = await ProductModel.findById(payment.items[0].productId).populate('shop', 'owner');
             if (firstProduct && firstProduct.shop && firstProduct.shop.owner) {
-              await emitNotification(io, firstProduct.shop.owner, {
-                type: 'payment',
+              await NotificationService.emitAndPersist(io, {
+                users: [firstProduct.shop.owner],
+                type: NotificationTypes.PAYMENT,
                 title: 'Pago recibido',
                 message: `Has recibido un pago por la orden ${payment.reference}`,
-                entity: 'payment',
-                data: { paymentId: payment._id, amount: payment.amount },
+                entity: payment._id,
+                data: {
+                  reference: payment.reference,
+                  amount: payment.amount,
+                  items: (payment.items || []).map(i => ({
+                    productName: i.productName,
+                    quantity: i.quantity,
+                    shopName: i.shopName
+                  }))
+                },
               });
             }
           }

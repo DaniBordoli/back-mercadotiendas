@@ -1,6 +1,7 @@
 const ProductQuestion = require('../models/ProductQuestion');
 const { successResponse, errorResponse } = require('../utils/response');
-const { emitNotification } = require('../utils/notification');
+const NotificationService = require('../services/notification.service');
+const { NotificationTypes } = require('../constants/notificationTypes');
 const Product = require('../models/Products');
 
 // Create a new question
@@ -32,12 +33,13 @@ exports.createQuestion = async (req, res) => {
         product.shop.owner &&
         product.shop.owner.toString() !== userId
       ) {
-        await emitNotification(io, product.shop.owner, {
-          type: 'product_question',
+        await NotificationService.emitAndPersist(io, {
+          users: [product.shop.owner],
+          type: NotificationTypes.QUESTION,
           title: 'Nueva pregunta sobre tu producto',
           message: `Han realizado una pregunta sobre tu producto ${product.name}`,
-          entity: 'product_question',
-          data: { productId, questionId: newQuestion._id },
+          entity: product._id,
+          data: { productName: product.name || '', questionText: newQuestion.question || '' },
         });
       }
     } catch (notifyErr) {
@@ -112,7 +114,7 @@ exports.answerQuestion = async (req, res) => {
     }
 
     // Verificar que el producto pertenezca a la tienda del usuario autenticado
-    const product = await Product.findById(question.productId).select('shop');
+    const product = await Product.findById(question.productId).select('shop name');
     if (!product) {
       return errorResponse(res, 'Producto no encontrado', 404);
     }
@@ -134,12 +136,13 @@ exports.answerQuestion = async (req, res) => {
     try {
       const io = req.app.get('io');
       if (io && question.userId.toString() !== user._id.toString()) {
-        await emitNotification(io, question.userId, {
-          type: 'question_answer',
+        await NotificationService.emitAndPersist(io, {
+          users: [question.userId],
+          type: NotificationTypes.QUESTION,
           title: 'Tu pregunta ha sido respondida',
           message: 'El vendedor ha respondido tu pregunta sobre el producto.',
-          entity: 'product_question',
-          data: { questionId: question._id, productId: question.productId },
+          entity: question.productId,
+          data: { productName: product.name || '', questionText: question.question || '' },
         });
       }
     } catch (notifyErr) {

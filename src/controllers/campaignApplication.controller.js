@@ -1,4 +1,6 @@
-const { CampaignApplication, Campaign, User } = require('../models');
+const { CampaignApplication, Campaign, User, Shop } = require('../models');
+const NotificationService = require('../services/notification.service');
+const { NotificationTypes } = require('../constants/notificationTypes');
 const mongoose = require('mongoose');
 const { validationResult } = require('express-validator');
 
@@ -115,9 +117,27 @@ exports.applyToCampaign = async (req, res, next) => {
     });
     
     await application.save();
-    
-    // Incrementar el contador de aplicaciones en la campaña
+
     await campaign.incrementApplicationsCount();
+    try {
+      const shop = await Shop.findById(campaign.shop).select('owner');
+      const io = req.app.get('io');
+      if (shop && io) {
+        await NotificationService.emitAndPersist(io, {
+          users: [shop.owner],
+          type: NotificationTypes.CAMPAIGN,
+          title: 'Nueva postulación',
+          message: `Has recibido una nueva postulación en tu campaña ${campaign.name || ''}`,
+          entity: campaign._id,
+          data: {
+            campaignName: campaign.name || '',
+            milestonesCount: Array.isArray(milestones) ? milestones.length : 0,
+            proposedFee: proposedFee || 0,
+            platforms: Array.isArray(platforms) ? platforms : []
+          }
+        });
+      }
+    } catch (e) {}
     
     res.status(201).json({
       success: true,
@@ -376,8 +396,30 @@ exports.updateApplicationStatus = async (req, res) => {
       new: true,
       runValidators: false
     });
+    try {
+      const io = req.app.get('io');
+      if (io && updatedApplication) {
+        await NotificationService.emitAndPersist(io, {
+          users: [updatedApplication.user],
+          type: NotificationTypes.CAMPAIGN,
+          title: `Aplicación ${status}`,
+          message: `Tu aplicación para la campaña ${campaign?.name || ''} ha sido ${status}`,
+          entity: updatedApplication.campaign,
+          data: { campaignName: campaign?.name || '', status }
+        });
+      }
+    } catch (e) {}
 
     if (status === 'accepted' && campaign && campaign.exclusive === true) {
+      let toRejectUsers = [];
+      try {
+        const others = await CampaignApplication.find({
+          _id: { $ne: id },
+          campaign: campaign._id,
+          status: { $in: ['pending', 'viewed'] }
+        }).select('user');
+        toRejectUsers = others.map((a) => a.user);
+      } catch (e) {}
       await CampaignApplication.updateMany(
         {
           _id: { $ne: id },
@@ -394,6 +436,19 @@ exports.updateApplicationStatus = async (req, res) => {
           }
         }
       ).catch(console.error);
+      try {
+        const io = req.app.get('io');
+        if (io && toRejectUsers.length) {
+          await NotificationService.emitAndPersist(io, {
+            users: toRejectUsers,
+            type: NotificationTypes.CAMPAIGN,
+            title: 'Aplicación rechazada',
+            message: 'Tu aplicación para la campaña ha sido rechazada',
+            entity: campaign._id,
+            data: { status: 'rejected' }
+          });
+        }
+      } catch (e) {}
     }
 
     res.status(200).json({
@@ -559,6 +614,21 @@ exports.submitMilestone = async (req, res) => {
     milestone.reviewNotes = null;
 
     await application.save();
+    try {
+      const campaign = await Campaign.findById(application.campaign).select('shop name');
+      const shop = campaign ? await Shop.findById(campaign.shop).select('owner') : null;
+      const io = req.app.get('io');
+      if (io && shop) {
+        await NotificationService.emitAndPersist(io, {
+          users: [shop.owner],
+          type: NotificationTypes.MILESTONE,
+          title: 'Hito enviado',
+          message: `Se entregó el hito "${milestone.title || ''}" para revisión en ${campaign?.name || ''}`,
+          entity: application.campaign,
+          data: { campaignName: campaign?.name || '', milestoneTitle: milestone.title || '' }
+        });
+      }
+    } catch (e) {}
 
     return res.status(200).json({ success: true, data: application, message: 'Hito entregado correctamente' });
   } catch (error) {
@@ -609,6 +679,19 @@ exports.reviewMilestone = async (req, res) => {
     milestone.reviewNotes = status === 'rejected' ? (reviewNotes || '') : null;
 
     await application.save();
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        await NotificationService.emitAndPersist(io, {
+          users: [application.user],
+          type: NotificationTypes.MILESTONE,
+          title: status === 'approved' ? 'Hito aprobado' : 'Hito rechazado',
+          message: status === 'approved' ? `Tu hito "${milestone.title || ''}" fue aprobado en ${application.campaign?.name || ''}` : `Tu hito "${milestone.title || ''}" fue rechazado en ${application.campaign?.name || ''}`,
+          entity: application.campaign,
+          data: { campaignName: application.campaign?.name || '', milestoneTitle: milestone.title || '', reviewNotes: milestone.reviewNotes || '' }
+        });
+      }
+    } catch (e) {}
 
     // Si el hito fue aprobado, verificar completitud
     if (status === 'approved') {
@@ -618,6 +701,29 @@ exports.reviewMilestone = async (req, res) => {
         application.decidedAt = new Date();
         application.decidedBy = req.user.id;
         await application.save();
+        try {
+          const io = req.app.get('io');
+          if (io) {
+            await NotificationService.emitAndPersist(io, {
+              users: [application.user],
+              type: NotificationTypes.CAMPAIGN,
+              title: 'Campaña completada',
+              message: 'Todos tus hitos fueron aprobados. La campaña ha finalizado.',
+              entity: application.campaign,
+              data: { campaignName: application.campaign?.name || '' }
+            });
+          }
+        } catch (e) {}
+
+        try {
+          const InfluencerProfile = require('../models/InfluencerProfile');
+          const profile = await InfluencerProfile.findOne({ user: application.user });
+          if (profile) {
+            await profile.campaignCompleted();
+          }
+        } catch (statsErr) {
+          console.error('Error actualizando estadísticas de influencer al completar campaña', statsErr);
+        }
       }
     }
 

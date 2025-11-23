@@ -1,6 +1,8 @@
 const InfluencerReview = require('../models/InfluencerReview');
-const { emitNotification } = require('../utils/notification');
+const NotificationService = require('../services/notification.service');
+const { NotificationTypes } = require('../constants/notificationTypes');
 const InfluencerProfile = require('../models/InfluencerProfile');
+const Campaign = require('../models/Campaign');
 const { successResponse, errorResponse } = require('../utils/response');
 const mongoose = require('mongoose');
 const Filter = require('bad-words');
@@ -82,13 +84,15 @@ exports.createReview = async (req, res) => {
     // Notificar al influencer de la nueva reseña
     try {
       const io = req.app.get('io');
+      const campaignDoc = await Campaign.findById(campaignId).select('name');
       if (io) {
-        await emitNotification(io, influencerId, {
-          type: 'influencer_review',
+        await NotificationService.emitAndPersist(io, {
+          users: [influencerId],
+          type: NotificationTypes.INFLUENCER_REVIEW,
           title: 'Has recibido una nueva reseña',
           message: 'Una marca ha dejado una reseña sobre tu participación',
-          entity: 'influencer_review',
-          data: { reviewId: review._id, campaignId },
+          entity: review._id,
+          data: { campaignName: campaignDoc?.name || '', rating },
         });
       }
     } catch (notifyErr) {
@@ -209,13 +213,23 @@ exports.updateReviewStatus = async (req, res) => {
   }
 };
 
-// Obtener reseñas públicas de un influencer
 exports.getInfluencerReviews = async (req, res) => {
   try {
     const { influencerId } = req.params;
-    const reviews = await InfluencerReview.find({ influencerId, status: { $in: ['published','edited'] } })
-      .sort({ createdAt: -1 });
-    return successResponse(res, reviews, 'Reseñas obtenidas');
+    const page = Math.max(1, parseInt(req.query.page || '1', 10));
+    const limit = Math.max(1, Math.min(50, parseInt(req.query.limit || '5', 10)));
+    const skip = (page - 1) * limit;
+
+    const [items, total] = await Promise.all([
+      InfluencerReview.find({ influencerId, status: { $in: ['published', 'edited'] } })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      InfluencerReview.countDocuments({ influencerId, status: { $in: ['published', 'edited'] } })
+    ]);
+
+    const hasMore = skip + items.length < total;
+    return successResponse(res, { items, page, limit, total, hasMore }, 'Reseñas obtenidas');
   } catch (err) {
     console.error('Error obteniendo reseñas:', err);
     return errorResponse(res, 'Error al obtener reseñas', 500);

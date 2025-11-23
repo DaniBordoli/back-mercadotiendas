@@ -93,4 +93,7 @@ router.put('/admin/influencer/:id/reject',
  */
 router.get('/influencers', influencerController.listInfluencers);
 
+// Métricas públicas agregadas del influencer
+router.get('/influencers/:id/metrics', influencerController.getInfluencerPublicMetrics);
+
 module.exports = router;

@@ -7,7 +7,8 @@ const {
   resetPassword,
   verifyResetToken,
   activateAccount,
-  resendActivationCode
+  resendActivationCode,
+  refreshToken
 } = require('../controllers/auth.controller');
 
 const { verifyFirebaseToken } = require('../controllers/firebase-auth.controller');
@@ -48,4 +49,5 @@ router.post('/activate-account', validateRequest('activateAccount'), activateAcc
  * @access Public
  */
 router.post('/resend-activation-code', validateRequest('email'), resendActivationCode);
+router.post('/refresh-token', refreshToken);
 module.exports = router;

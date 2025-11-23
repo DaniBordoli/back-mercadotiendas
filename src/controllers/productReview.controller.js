@@ -1,5 +1,6 @@
 const { ProductReview, Products, Shop } = require('../models');
-const { emitNotification } = require('../utils/notification');
+const NotificationService = require('../services/notification.service');
+const { NotificationTypes } = require('../constants/notificationTypes');
 const { successResponse, errorResponse } = require('../utils/response');
 
 // Crear una nueva reseña
@@ -24,12 +25,17 @@ const createReview = async (req, res) => {
       const io = req.app.get('io');
       const product = await Products.findById(productId).populate('shop');
       if (io && product && product.shop && product.shop.owner && product.shop.owner.toString() !== userId) {
-        await emitNotification(io, product.shop.owner, {
-          type: 'review',
+        await NotificationService.emitAndPersist(io, {
+          users: [product.shop.owner],
+          type: NotificationTypes.PRODUCT_REVIEW,
           title: 'Nueva reseña recibida',
           message: `Tu producto ${product.name} ha recibido una nueva reseña`,
-          entity: 'product',
-          data: { productId, reviewId: review._id },
+          entity: product._id,
+          data: {
+            productName: product.name || '',
+            rating: review.rating || 0,
+            reviewerName: review.userId?.fullName || review.userId?.name || 'Usuario'
+          },
         });
       }
     } catch (notifyErr) {

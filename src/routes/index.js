@@ -41,6 +41,9 @@ router.use('/product-reviews', productReviewRoutes);
 // Rutas de reseñas de influencers
 const influencerReviewRoutes = require('./influencerReview.routes');
 router.use('/influencer-reviews', influencerReviewRoutes);
+// Rutas de calificaciones de influencers
+const influencerRatingRoutes = require('./influencerRating.routes');
+router.use('/influencer-rating', influencerRatingRoutes);
 
 // Rutas de tienda (/api/shops/*)
 router.use('/shops', shopRoutes);
