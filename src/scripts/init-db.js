@@ -13,7 +13,7 @@ const initDB = async () => {
     console.log('Connected to MongoDB');
 
     // Verificar si ya existe un admin
-    const adminExists = await User.findOne({ role: 'admin' });
+    const adminExists = await User.findOne({ userType: 'admin' });
     if (adminExists) {
       console.log('Admin user already exists');
       process.exit(0);
@@ -24,7 +24,7 @@ const initDB = async () => {
       fullName: 'Admin',
       email: process.env.ADMIN_EMAIL || 'admin@mercadotiendas.com',
       password: process.env.ADMIN_PASSWORD || 'admin123456',
-      role: 'admin'
+      userType: ['admin']
     });
 
     // Encriptar contraseña

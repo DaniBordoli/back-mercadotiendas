@@ -7,7 +7,8 @@ const {
   handleWebhook,
   getUserPayments,
   getMobbexConnectUrl,
-  getMobbexCredentials
+  getMobbexCredentials,
+  completeMockPayment
 } = require('../controllers/payment.controller');
 
 /**
@@ -44,6 +45,13 @@ router.post('/mobbex-connect-url', verifyToken, getMobbexConnectUrl);
  * @access Private
  */
 router.get('/mobbex-credentials', verifyToken, getMobbexCredentials);
+
+/**
+ * @route POST /api/payments/mock-complete/:paymentId
+ * @desc Simular la finalización exitosa de un pago mock
+ * @access Public (para testing)
+ */
+router.post('/mock-complete/:paymentId', completeMockPayment);
 
 /**
  * @route POST /api/payments/webhook

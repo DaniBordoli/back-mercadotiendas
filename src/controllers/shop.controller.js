@@ -86,6 +86,46 @@ exports.createShop = async (req, res) => {
       }
     }
 
+    let templateConfigurations = shopData.templateConfigurations;
+    if (typeof templateConfigurations === 'string') {
+      try {
+        templateConfigurations = JSON.parse(templateConfigurations);
+      } catch (e) {
+        templateConfigurations = {};
+      }
+    }
+    if (!templateConfigurations || typeof templateConfigurations !== 'object') {
+      templateConfigurations = {};
+    }
+
+    const templateKey = shopData.layoutDesign || 'modern';
+
+    if (templateUpdate && Object.keys(templateUpdate).length > 0) {
+      const existingConfigForKey = templateConfigurations[templateKey] && typeof templateConfigurations[templateKey] === 'object'
+        ? { ...templateConfigurations[templateKey] }
+        : {};
+      templateConfigurations[templateKey] = deepMerge(existingConfigForKey, templateUpdate);
+    }
+
+    const resolvedTemplateUpdate = templateConfigurations[templateKey] && Object.keys(templateConfigurations[templateKey]).length > 0
+      ? templateConfigurations[templateKey]
+      : (templateUpdate && Object.keys(templateUpdate).length > 0 ? templateUpdate : null);
+
+    // Parse categories/subcategories if received as strings (from FormData)
+    if (typeof shopData.categories === 'string') {
+      try {
+        shopData.categories = JSON.parse(shopData.categories);
+      } catch (e) {
+        shopData.categories = [];
+      }
+    }
+    if (typeof shopData.subcategories === 'string') {
+      try {
+        shopData.subcategories = JSON.parse(shopData.subcategories);
+      } catch (e) {
+        shopData.subcategories = [];
+      }
+    }
     const shopModelData = {
       name: shopData.shopName,
       description: shopData.description || '', // Provide default if optional
@@ -95,10 +135,12 @@ exports.createShop = async (req, res) => {
       layoutDesign: shopData.layoutDesign,
       contactEmail: shopData.contactEmail,
       shopPhone: shopData.shopPhone,
-      templateUpdate: templateUpdate && Object.keys(templateUpdate).length > 0 
-        ? templateUpdate 
-        : null, // Usar null en lugar de {} para indicar que no hay template configurado
+      templateUpdate: resolvedTemplateUpdate,
+      templateConfigurations,
       owner: userId,
+      // Nuevos campos de categorías y subcategorías (IDs)
+      categories: Array.isArray(shopData.categories) ? shopData.categories.map(c => c.id || c) : [],
+      subcategories: Array.isArray(shopData.subcategories) ? shopData.subcategories.map(s => s.id || s) : [],
       // active: true, // Default is true in model
       // imageUrl: null, // Default is null
     };
@@ -110,10 +152,14 @@ exports.createShop = async (req, res) => {
         shopModelData.imageUrl = logoUrl;
         
         // También agregar logoUrl al templateUpdate
-        if (!shopModelData.templateUpdate) {
+        if (!shopModelData.templateUpdate || typeof shopModelData.templateUpdate !== 'object') {
           shopModelData.templateUpdate = {};
         }
         shopModelData.templateUpdate.logoUrl = logoUrl;
+        if (!shopModelData.templateConfigurations[templateKey]) {
+          shopModelData.templateConfigurations[templateKey] = {};
+        }
+        shopModelData.templateConfigurations[templateKey].logoUrl = logoUrl;
       } catch (uploadError) {
         console.error('Error al subir logo a Cloudinary:', uploadError);
         return errorResponse(res, 'Error al procesar el logo', 500);
@@ -149,7 +195,9 @@ exports.createShop = async (req, res) => {
 exports.getShop = async (req, res) => {
   try {
     const { id } = req.params;
-    const shop = await Shop.findById(id);
+    const shop = await Shop.findById(id)
+      .populate('categories', 'name description')
+      .populate('subcategories', 'name description');
     
     if (!shop) {
       return errorResponse(res, 'Tienda no encontrada', 404);
@@ -167,7 +215,9 @@ exports.getPublicShop = async (req, res) => {
     const { id } = req.params;
     console.log('Buscando tienda pública con ID:', id);
     
-    const shop = await Shop.findById(id);
+    const shop = await Shop.findById(id)
+      .populate('categories', 'name description')
+      .populate('subcategories', 'name description');
     console.log('Tienda encontrada:', shop ? 'Sí' : 'No');
     
     if (!shop) {
@@ -181,10 +231,34 @@ exports.getPublicShop = async (req, res) => {
       return errorResponse(res, 'Esta tienda no está disponible', 404);
     }
 
-    // Incluir templateUpdate para obtener los estilos del usuario
+    const shopObject = shop.toObject({
+      getters: true,
+      virtuals: true
+    });
+
+    const configurations = shopObject.templateConfigurations || shop.templateConfigurations || {};
+    const layoutKey = shopObject.layoutDesign || shop.template || 'modern';
+    const configEntries = configurations && typeof configurations === 'object'
+      ? Object.entries(configurations)
+      : [];
+
+    let effectiveTemplate = shopObject.templateUpdate || shop.templateUpdate || null;
+    if (!effectiveTemplate || Object.keys(effectiveTemplate).length === 0) {
+      if (configurations && configurations[layoutKey] && Object.keys(configurations[layoutKey]).length > 0) {
+        effectiveTemplate = configurations[layoutKey];
+      } else if (configEntries.length > 0) {
+        const firstNonEmpty = configEntries.find(([, value]) => value && Object.keys(value).length > 0);
+        if (firstNonEmpty) {
+          effectiveTemplate = firstNonEmpty[1];
+        }
+      }
+    }
+
+    // Incluir templateUpdate consolidado y todas las configuraciones disponibles
     const shopData = {
-      ...shop.toObject(),
-      templateUpdate: shop.templateUpdate || null
+      ...shopObject,
+      templateUpdate: effectiveTemplate,
+      templateConfigurations: configurations
     };
 
     console.log('Retornando datos de tienda pública exitosamente');
@@ -300,15 +374,33 @@ exports.deleteShop = async (req, res) => {
 exports.updateShopTemplate = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { templateUpdate } = req.body;
+    const { templateUpdate, templateKey } = req.body;
     if (!templateUpdate || typeof templateUpdate !== 'object') {
       return errorResponse(res, 'templateUpdate es requerido y debe ser un objeto', 400);
     }
-    const user = await User.findById(userId).populate('shop');
+    const user = await User.findById(userId).populate({
+      path: 'shop',
+      populate: [
+        { path: 'categories', select: 'name description' },
+        { path: 'subcategories', select: 'name description' }
+      ]
+    });
     if (!user || !user.shop) {
-      return errorResponse(res, 'Tienda no encontrada para el usuario', 404);
+      // Si el usuario aún no tiene una tienda asociada (por ejemplo, durante el proceso de creación),
+      // devolvemos una respuesta exitosa con templateUpdate en null para que el frontend utilice
+      // los valores por defecto sin interrumpir el flujo.
+      return successResponse(res, { templateUpdate: null });
     }
-    const current = user.shop.templateUpdate || {};
+    const activeTemplateKey = templateKey || user.shop.layoutDesign || 'modern';
+    const current = user.shop.templateUpdate && typeof user.shop.templateUpdate === 'object'
+      ? user.shop.templateUpdate
+      : {};
+    const currentConfigurations = user.shop.templateConfigurations && typeof user.shop.templateConfigurations === 'object'
+      ? user.shop.templateConfigurations
+      : {};
+    const currentConfigForKey = currentConfigurations[activeTemplateKey] && typeof currentConfigurations[activeTemplateKey] === 'object'
+      ? currentConfigurations[activeTemplateKey]
+      : {};
     
     // Preservar el logoUrl actual si no se está enviando uno nuevo explícitamente
     if (current.logoUrl && !templateUpdate.logoUrl) {
@@ -320,8 +412,19 @@ exports.updateShopTemplate = async (req, res) => {
       user.shop.imageUrl = templateUpdate.logoUrl;
     }
     
-    const merged = deepMerge({ ...current }, templateUpdate);
-    user.shop.templateUpdate = merged;
+    const mergedConfigForKey = deepMerge({ ...currentConfigForKey }, templateUpdate);
+    const isUpdatingActiveTemplate = (user.shop.layoutDesign || activeTemplateKey) === activeTemplateKey;
+
+    if (isUpdatingActiveTemplate) {
+      user.shop.templateUpdate = mergedConfigForKey;
+    } else {
+      user.shop.templateUpdate = deepMerge({ ...current }, templateUpdate);
+    }
+
+    user.shop.templateConfigurations = {
+      ...currentConfigurations,
+      [activeTemplateKey]: mergedConfigForKey,
+    };
     
     // Sincronizar ciertas propiedades del template con el modelo Shop
     const shopUpdates = {};
@@ -366,7 +469,13 @@ exports.getMyShop = async (req, res) => {
   try {
     const userId = req.user.id;
     
-    const user = await User.findById(userId).populate('shop');
+    const user = await User.findById(userId).populate({
+      path: 'shop',
+      populate: [
+        { path: 'categories', select: 'name description' },
+        { path: 'subcategories', select: 'name description' }
+      ]
+    });
     
     if (!user || !user.shop) {
       return errorResponse(res, 'Usuario no tiene tienda asociada', 404);
@@ -449,9 +558,12 @@ exports.getShopTemplate = async (req, res) => {
     if (!user || !user.shop) {
       return errorResponse(res, 'Tienda no encontrada para el usuario', 404);
     }
-    
+    const layoutKey = user.shop.layoutDesign || 'modern';
+    const configurations = user.shop.templateConfigurations && typeof user.shop.templateConfigurations === 'object'
+      ? user.shop.templateConfigurations
+      : {};
     // Si templateUpdate está vacío o no existe, devolver null para que el frontend use defaults
-    let templateUpdate = user.shop.templateUpdate;
+    let templateUpdate = configurations[layoutKey] || user.shop.templateUpdate;
     const hasValidTemplate = templateUpdate && 
       typeof templateUpdate === 'object' && 
       Object.keys(templateUpdate).length > 0;
@@ -506,5 +618,72 @@ exports.updateMobbexCredentials = async (req, res) => {
   } catch (err) {
     console.error('Error al actualizar credenciales de Mobbex:', err);
     return errorResponse(res, 'Error interno al actualizar credenciales de Mobbex', 500);
+  }
+};
+
+// Verificar disponibilidad del nombre de la tienda
+exports.checkShopNameAvailability = async (req, res) => {
+  try {
+    const { name } = req.query;
+    
+    if (!name || name.trim().length === 0) {
+      return errorResponse(res, 'El nombre de la tienda es requerido', 400);
+    }
+    
+    // Buscar si ya existe una tienda con ese nombre (case insensitive)
+    const existingShop = await Shop.findOne({ 
+      name: { $regex: new RegExp(`^${name.trim()}$`, 'i') } 
+    });
+    
+    const isAvailable = !existingShop;
+    
+    return successResponse(res, { 
+      available: isAvailable,
+      name: name.trim()
+    });
+  } catch (err) {
+    console.error('Error al verificar disponibilidad del nombre:', err);
+    return errorResponse(res, 'Error interno al verificar disponibilidad', 500);
+  }
+};
+
+// Seguir o dejar de seguir una tienda
+exports.followShop = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id: shopId } = req.params;
+
+    // Verificar que la tienda exista y esté activa
+    const shop = await Shop.findById(shopId);
+    if (!shop) {
+      return errorResponse(res, 'Tienda no encontrada', 404);
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return errorResponse(res, 'Usuario no encontrado', 404);
+    }
+
+    const isFollowing = user.followingShops && user.followingShops.some(s => s.toString() === shopId);
+
+    if (isFollowing) {
+      // Unfollow
+      user.followingShops = user.followingShops.filter(s => s.toString() !== shopId);
+      shop.followers = Math.max(0, (shop.followers || 0) - 1);
+    } else {
+      // Follow
+      user.followingShops.push(shopId);
+      shop.followers = (shop.followers || 0) + 1;
+    }
+
+    await Promise.all([user.save(), shop.save()]);
+
+    return successResponse(res, {
+      followed: !isFollowing,
+      followers: shop.followers
+    }, isFollowing ? 'Dejaste de seguir la tienda' : 'Has comenzado a seguir la tienda');
+  } catch (err) {
+    console.error('Error en follow/unfollow shop:', err);
+    return errorResponse(res, 'Error al procesar la solicitud de seguimiento', 500);
   }
 };

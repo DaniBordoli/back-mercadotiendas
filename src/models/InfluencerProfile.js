@@ -69,6 +69,10 @@ const influencerProfileSchema = new mongoose.Schema({
       default: 0,
       min: 0,
       max: 5
+    },
+    totalFollowers: {
+      type: Number,
+      default: 0
     }
   },
   

@@ -1,10 +1,17 @@
-const { createCheckout, checkPaymentStatus, processWebhook } = require('../services/mobbex.service');
+// Comentamos Mobbex y usamos el servicio mock
+// const { createCheckout, checkPaymentStatus, processWebhook } = require('../services/mobbex.service');
+const { createCheckout, checkPaymentStatus, processWebhook, simulateSuccessfulWebhook } = require('../services/mock-payment.service');
 const { successResponse, errorResponse } = require('../utils/response');
 const Payment = require('../models/Payment');
 const Shop = require('../models/Shop');
 const { updateProductStock } = require('./product.controller'); // Importar la función de stock
+const NotificationService = require('../services/notification.service');
+const { NotificationTypes } = require('../constants/notificationTypes');
+const ProductModel = require('../models/Products');
 const axios = require('axios');
-const mobbexConfig = require('../config/mobbex');
+// const mobbexConfig = require('../config/mobbex'); // No necesario para mock
+const LiveEventMetrics = require('../models/LiveEventMetrics');
+const LiveEventProductMetrics = require('../models/LiveEventProductMetrics');
 
 /**
  * Crea un checkout para un pedido
@@ -40,58 +47,100 @@ const createOrderCheckout = async (req, res) => {
 
     const userId = req.user && req.user.id ? req.user.id : null;
 
-    // Obtener la tienda del usuario autenticado
-    const userShop = req.user && req.user.shop ? req.user.shop : null;
-    let shop = null;
-    if (userShop) {
-      shop = await Shop.findById(userShop);
-    }
-    if (!shop) {
-      return errorResponse(res, 'No se encontró la tienda asociada al usuario', 400);
+    // Obtener información de los productos y sus tiendas
+    const productIds = items.map((item) => item.productId);
+    const products = await require('../models/Products').find({ _id: { $in: productIds } }).populate('shop', 'name mobbexApiKey mobbexAccessToken');
+
+    if (!products || products.length === 0) {
+      return errorResponse(res, 'No se encontraron los productos especificados', 400);
     }
 
-    // Preparar ítems para guardar en la base de datos, incluyendo productId del frontend
-    const paymentItems = items.map(item => ({
-      productId: item.productId,
-      quantity: item.quantity,
-      unitPrice: item.price,
-      productName: item.name,
-      productImage: item.image
-    }));
+    // Mapear productos para acceso rápido
+    const productMap = new Map();
+    products.forEach((product) => {
+      productMap.set(product._id.toString(), product);
+    });
+
+    // Preparar ítems, asignando shopName desde la tienda del producto
+    const paymentItems = items.map((item) => {
+      const prod = productMap.get(item.productId);
+      const shopName = prod && prod.shop ? prod.shop.name : 'Tienda no especificada';
+      return {
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: item.price,
+        productName: item.name,
+        productImage: item.image,
+        shopName,
+      };
+    });
+
+    // Seleccionar la tienda del primer producto para credenciales de pago (asumiendo un único owner)
+    const checkoutShop = products[0].shop;
+    if (!checkoutShop) {
+      return errorResponse(res, 'No se encontró la tienda asociada a los productos', 400);
+    }
 
     // Generar una referencia única para el pedido que se enviará a Mobbex
     orderData.reference = `order_${Date.now()}`;
 
-    // Crear checkout en Mobbex usando credenciales de la tienda
-    console.log('=== BACKEND: Ítems enviados a Mobbex service desde controller ===', JSON.stringify(items, null, 2));
-    console.log('=== BACKEND: Llamando al servicio de Mobbex ===');
+    // Crear checkout usando el servicio mock (reemplaza Mobbex temporalmente)
+    console.log('=== BACKEND: Ítems enviados al servicio mock desde controller ===', JSON.stringify(items, null, 2));
+    console.log('=== BACKEND: Llamando al servicio de pago mock ===');
     const checkoutResponse = await createCheckout(orderData, customerData, items, {
-      mobbexApiKey: shop.mobbexApiKey,
-      mobbexAccessToken: shop.mobbexAccessToken
+      mobbexApiKey: checkoutShop.mobbexApiKey || 'mock_api_key',
+      mobbexAccessToken: checkoutShop.mobbexAccessToken || 'mock_access_token',
     });
 
-    console.log('=== BACKEND: Respuesta del servicio Mobbex ===');
+    console.log('=== BACKEND: Respuesta del servicio mock ===');
     console.log('checkoutResponse:', JSON.stringify(checkoutResponse, null, 2));
 
-    // Si el checkout con Mobbex fue exitoso, crear y guardar el registro de pago en nuestra DB
+    // Si el checkout mock fue exitoso, crear y guardar el registro de pago en nuestra DB
     if (checkoutResponse.success && checkoutResponse.data.id) {
+      const { liveEventId } = req.body;
       const newPayment = new Payment({
         user: userId,
         mobbexId: checkoutResponse.data.id,
-        reference: orderData.reference, // La referencia que enviamos a Mobbex
+        reference: orderData.reference,
         amount: orderData.total,
         currency: orderData.currency || 'ARS',
-        // Se asegura que el código de estado inicial siempre esté presente.
-        status: { code: '1', text: 'Mobbex Checkout Creado' }, // Usar estado de Mobbex
-        paymentMethod: null, // Mobbex no suele devolver el método de pago aquí, se actualiza con webhook
-        paymentData: checkoutResponse.data, // Guardar los datos completos de Mobbex checkout
-        items: paymentItems // Los ítems preparados
+        status: { code: '1', text: 'Mock Checkout Creado' },
+        paymentMethod: null,
+        paymentData: checkoutResponse.data,
+        items: paymentItems,
+        ...(liveEventId ? { liveEvent: liveEventId } : {})
       });
       await newPayment.save();
-      console.log('=== BACKEND: Registro de pago creado exitosamente en DB local con MobbexId:', newPayment._id, '===');
+      console.log('=== BACKEND: Registro de pago creado exitosamente en DB local con MockId:', newPayment._id, '===');
+
+      // Emitir notificación al vendedor sobre la nueva orden
+      try {
+        const io = req.app.get('io');
+        if (io && checkoutShop.owner) {
+          await emitNotification(io, checkoutShop.owner, {
+            type: 'order',
+            title: 'Nueva orden recibida',
+            message: `Se ha creado la orden ${orderData.reference}`,
+            entity: 'order',
+            data: { paymentId: newPayment._id, reference: orderData.reference },
+          });
+        }
+        // Notificar también al comprador si está autenticado
+        if (io && userId) {
+          await emitNotification(io, userId, {
+            type: 'order',
+            title: 'Orden creada',
+            message: `Tu orden ${orderData.reference} ha sido creada exitosamente`,
+            entity: 'order',
+            data: { paymentId: newPayment._id, reference: orderData.reference },
+          });
+        }
+      } catch (notifyErr) {
+        console.error('Error al emitir notificación de nueva orden:', notifyErr);
+      }
     } else {
-      console.error('=== BACKEND: Error al obtener ID de Mobbex para el checkout ===');
-      throw new Error('Error al crear el checkout de pago con Mobbex.');
+      console.error('=== BACKEND: Error al obtener ID del mock para el checkout ===');
+      throw new Error('Error al crear el checkout de pago con el servicio mock.');
     }
 
     return successResponse(res, checkoutResponse, 'Checkout creado exitosamente');
@@ -125,10 +174,14 @@ const getPaymentStatus = async (req, res) => {
       return successResponse(res, existingPayment, 'Estado del pago obtenido desde la base de datos');
     }
 
-    // Si no existe en nuestra base de datos, consultamos a Mobbex
-    const paymentStatus = await checkPaymentStatus(id);
+    // Si no existe en nuestra base de datos, consultamos el servicio mock
+    const paymentStatusResponse = await checkPaymentStatus(id);
 
-    return successResponse(res, paymentStatus, 'Estado del pago obtenido exitosamente');
+    if (!paymentStatusResponse.success) {
+      return errorResponse(res, 'Error al obtener el estado del pago', 500);
+    }
+
+    return successResponse(res, paymentStatusResponse.data, 'Estado del pago obtenido exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al verificar el estado del pago', 500, error.message);
   }
@@ -157,6 +210,12 @@ const handleWebhook = async (req, res) => {
     });
     
     if (payment) {
+      // Verificar que el pago tenga un usuario válido asociado
+      if (!payment.user) {
+        console.warn('=== BACKEND: Webhook recibido para un pago sin usuario asociado. Ignorando webhook. PaymentId:', payment._id, '===');
+        return res.status(200).json({ success: true, message: 'Webhook ignorado - pago sin usuario' });
+      }
+
       // Actualizar el pago existente
       payment.status = paymentInfo.status;
       payment.paymentMethod = paymentInfo.paymentMethod;
@@ -168,11 +227,99 @@ const handleWebhook = async (req, res) => {
       console.log('=== BACKEND: Estado del pago en webhook:', paymentInfo.status.code, '==='); // Nuevo log
 
       // Si el pago es aprobado, actualizar el stock de los productos
+      if ((paymentInfo.status.code === '2' || paymentInfo.status.code === '200') && payment.liveEvent) {
+        // Incrementar compras y monto de ventas
+        LiveEventMetrics.updateOne(
+          { event: payment.liveEvent },
+          {
+            $inc: {
+              purchases: 1,
+              salesAmount: payment.amount || 0
+            }
+          },
+          { upsert: true }
+        ).catch(console.error);
+
+        // Actualizar métricas por producto (purchases y revenue)
+        try {
+          for (const item of payment.items) {
+            const quantity = item.quantity || 1;
+            const unitPrice = item.unitPrice || item.price || 0;
+            await LiveEventProductMetrics.updateOne(
+              { event: payment.liveEvent, product: item.productId },
+              {
+                $inc: {
+                  purchases: quantity,
+                  revenue: unitPrice * quantity,
+                },
+              },
+              { upsert: true }
+            );
+          }
+
+          // Emitir actualización de métricas por Socket.IO
+          const io = req.app.get('io');
+          if (io) {
+            const productMetrics = await LiveEventProductMetrics.find({ event: payment.liveEvent }).populate('product', 'nombre precio productImages');
+            io.to(`event_${payment.liveEvent}`).emit('productMetricsUpdated', {
+              eventId: payment.liveEvent,
+              metrics: productMetrics,
+            });
+          }
+        } catch (e) {
+          console.warn('No se pudieron actualizar/emitar métricas de productos', e.message);
+        }
+      }
       if (paymentInfo.status.code === '2' || paymentInfo.status.code === '200') {
         console.log('=== BACKEND: Pago aprobado. Actualizando stock de productos... ===');
         for (const item of payment.items) {
           console.log(`=== BACKEND: Item para actualizar stock - Product ID: ${item.productId}, Quantity: ${item.quantity} ===`); // Nuevo log
           await updateProductStock(item.productId, item.quantity);
+        }
+        // Emitir notificaciones de pago aprobado
+        try {
+          const io = req.app.get('io');
+          if (io) {
+            // Notificar al comprador
+            await NotificationService.emitAndPersist(io, {
+              users: [payment.user],
+              type: NotificationTypes.PAYMENT,
+              title: 'Pago aprobado',
+              message: `Tu pago para la orden ${payment.reference} ha sido acreditado exitosamente`,
+              entity: payment._id,
+              data: {
+                reference: payment.reference,
+                amount: payment.amount,
+                items: (payment.items || []).map(i => ({
+                  productName: i.productName,
+                  quantity: i.quantity,
+                  shopName: i.shopName
+                }))
+              },
+            });
+            // Obtener vendedor (dueño de la tienda del primer producto)
+            const firstProduct = await ProductModel.findById(payment.items[0].productId).populate('shop', 'owner');
+            if (firstProduct && firstProduct.shop && firstProduct.shop.owner) {
+              await NotificationService.emitAndPersist(io, {
+                users: [firstProduct.shop.owner],
+                type: NotificationTypes.PAYMENT,
+                title: 'Pago recibido',
+                message: `Has recibido un pago por la orden ${payment.reference}`,
+                entity: payment._id,
+                data: {
+                  reference: payment.reference,
+                  amount: payment.amount,
+                  items: (payment.items || []).map(i => ({
+                    productName: i.productName,
+                    quantity: i.quantity,
+                    shopName: i.shopName
+                  }))
+                },
+              });
+            }
+          }
+        } catch (notifErr) {
+          console.error('Error al emitir notificación de pago aprobado:', notifErr);
         }
       } else if (paymentInfo.status.code === '3' || paymentInfo.status.code === '4' || paymentInfo.status.code === '400') {
         console.log('=== BACKEND: Pago rechazado/cancelado. No se actualiza el stock. ===');
@@ -262,11 +409,88 @@ const getMobbexCredentials = async (req, res) => {
   }
 };
 
+/**
+ * Simula la finalización exitosa de un pago mock
+ * @param {Object} req - Request
+ * @param {Object} res - Response
+ */
+const completeMockPayment = async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+
+    console.log('=== MOCK PAYMENT: Completando pago simulado ===', paymentId);
+
+    // Buscar el pago en la base de datos
+    const payment = await Payment.findOne({ mobbexId: paymentId });
+
+    if (!payment) {
+      return errorResponse(res, 'Pago no encontrado', 404);
+    }
+
+    // Simular webhook exitoso
+    const webhookData = simulateSuccessfulWebhook(paymentId, payment.reference);
+    
+    // Procesar el webhook simulado
+    const paymentInfo = processWebhook(webhookData);
+    
+    // Actualizar el pago
+    payment.status = paymentInfo.status;
+    payment.paymentMethod = paymentInfo.paymentMethod;
+    payment.paymentData = { ...payment.paymentData, ...webhookData.payment };
+    payment.updatedAt = new Date();
+    
+    await payment.save();
+    console.log('=== MOCK PAYMENT: Pago actualizado exitosamente ===', payment._id);
+
+    // Actualizar stock de productos (simula el comportamiento del webhook real)
+    if (paymentInfo.status.code === '2') {
+      console.log('=== MOCK PAYMENT: Actualizando stock de productos... ===');
+      for (const item of payment.items) {
+        console.log(`=== MOCK PAYMENT: Actualizando stock - Product ID: ${item.productId}, Quantity: ${item.quantity} ===`);
+        try {
+          const stockResult = await updateProductStock(item.productId, item.quantity);
+          if (!stockResult.success) {
+            console.warn(`=== MOCK PAYMENT: No se pudo actualizar stock para producto ${item.productId}: ${stockResult.message} ===`);
+          }
+        } catch (error) {
+          console.error(`=== MOCK PAYMENT: Error al actualizar stock para producto ${item.productId}:`, error);
+          // Continuar con el siguiente producto en lugar de fallar completamente
+        }
+      }
+    }
+
+    return successResponse(res, {
+      payment: payment,
+      message: 'Pago mock completado exitosamente'
+    }, 'Pago procesado exitosamente');
+
+    // Emitir métricas actualizadas por Socket.IO si corresponde
+    try {
+      if (payment.liveEvent) {
+        const io = req.app.get('io');
+        if (io) {
+          const productMetrics = await LiveEventProductMetrics.find({ event: payment.liveEvent }).populate('product', 'nombre precio productImages');
+          io.to(`event_${payment.liveEvent}`).emit('productMetricsUpdated', {
+            eventId: payment.liveEvent,
+            metrics: productMetrics,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('No se pudo emitir productMetricsUpdated después de pago mock', e.message);
+    }
+  } catch (error) {
+    console.error('Error al completar pago mock:', error);
+    return errorResponse(res, 'Error al procesar el pago mock', 500, error.message);
+  }
+};
+
 module.exports = {
   createOrderCheckout,
   getPaymentStatus,
   handleWebhook,
   getUserPayments,
   getMobbexConnectUrl,
-  getMobbexCredentials
+  getMobbexCredentials,
+  completeMockPayment
 };

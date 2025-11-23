@@ -7,26 +7,35 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "init-db": "node src/scripts/init-db.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest --runInBand"
   },
   "dependencies": {
+    "bad-words": "^3.0.4",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^2.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
+    "express-rate-limit": "^6.11.0",
     "express-validator": "^7.0.1",
     "firebase-admin": "^11.10.1",
     "google-auth-library": "^9.0.0",
+    "googleapis": "^161.0.0",
     "jsonwebtoken": "^9.0.0",
     "mobbex": "^2.3.5",
     "mongoose": "^7.0.3",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.2",
     "nodemailer": "^6.9.1",
-    "openai": "^4.96.2"
+    "openai": "^4.96.2",
+    "slugify": "^1.6.6",
+    "socket.io": "^4.7.2"
   },
   "devDependencies": {
-    "nodemon": "^2.0.22"
+    "@types/jest": "^30.0.0",
+    "jest": "^30.2.0",
+    "mongodb-memory-server": "^10.3.0",
+    "nodemon": "^2.0.22",
+    "supertest": "^7.1.4"
   }
 }

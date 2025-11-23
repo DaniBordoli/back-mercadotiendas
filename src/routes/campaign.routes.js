@@ -14,9 +14,8 @@ router.get('/:id', campaignController.getCampaignById);
 router.post('/', verifyToken, [
   check('name', 'El nombre es obligatorio').not().isEmpty(),
   check('description', 'La descripción es obligatoria').not().isEmpty(),
-  check('budget', 'El presupuesto es obligatorio').isNumeric(),
-  check('endDate', 'La fecha de finalización es obligatoria').isISO8601(),
-  check('category', 'La categoría es obligatoria').not().isEmpty()
+  check('objectives', 'Debes seleccionar al menos un objetivo').isArray({ min: 1 }),
+  check('startDate', 'La fecha de inicio es obligatoria').isISO8601(),
 ], function(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -32,7 +31,13 @@ router.put('/:id', verifyToken, campaignController.updateCampaign);
 router.delete('/:id', verifyToken, campaignController.deleteCampaign);
 
 // GET /api/campaigns/shop/:shopId - Obtener campañas por tienda
-router.get('/shop/:shopId', campaignController.getCampaignsByShop);
+router.get('/shop/:shopId', verifyToken, campaignController.getCampaignsByShop);
+
+// PATCH /api/campaigns/:id/step2 - Guardar paso 2 (productos)
+router.patch('/:id/step2', verifyToken, campaignController.updateCampaign);
+
+// PATCH /api/campaigns/:id/step3 - Guardar paso 3 (milestones y KPIs)
+router.patch('/:id/step3', verifyToken, campaignController.updateCampaign);
 
 // PATCH /api/campaigns/:id/status - Actualizar estado de una campaña (requiere autenticación)
 router.patch('/:id/status', verifyToken, campaignController.updateCampaignStatus);

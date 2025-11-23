@@ -4,7 +4,7 @@
  */
 module.exports = function(req, res, next) {
   // Verificar que el usuario está autenticado y es influencer
-  if (!req.user || !req.user.isInfluencer) {
+  if (!req.user || !req.user.userType?.includes('influencer')) {
     return res.status(403).json({ msg: 'Acceso denegado. Se requiere ser influencer para acceder a este recurso.' });
   }
   

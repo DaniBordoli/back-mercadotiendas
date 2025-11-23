@@ -7,8 +7,12 @@ const { verifyToken } = require('../middlewares/auth');
 router.post('/', verifyToken, categoryController.createCategory);
 // Eliminar categoría
 router.delete('/:id', verifyToken, categoryController.deleteCategory);
+// Obtener categorías principales (público)
+router.get('/public', categoryController.getPublicMainCategories);
 // Obtener todas las categorías
 router.get('/', verifyToken, categoryController.getAllCategories);
+// Obtener subcategorías por categoría padre
+router.get('/:parentId/subcategories', verifyToken, categoryController.getSubcategoriesByParent);
 // Obtener una categoría por ID
 router.get('/:id', verifyToken, categoryController.getCategoryById);
 // Actualizar categoría

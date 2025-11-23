@@ -64,11 +64,16 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: false
   },
-  role: {
-    type: String,
-    enum: ['admin', 'user'],
-    default: 'user',
+  // Dirección preferida opcional del comprador
+  preferredAddress: {
+    type: Object, // Contendrá country, province, city, postalCode, streetAndNumber, role
+    default: null
   },
+  // role: {
+  //   type: String,
+  //   enum: ['admin', 'user'],
+  //   default: 'user',
+  // },
   resetPasswordToken: String,
   resetPasswordExpires: Date,
   shop: {
@@ -87,10 +92,30 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null
   },
-  isInfluencer: {
-    type: Boolean,
-    default: false
-  }
+  youtubeTokens: {
+    type: Object, // Almacena access_token, refresh_token, scope, expiry_date, etc.
+    default: null
+  },
+  userType: {
+    type: [String],
+    enum: ['buyer', 'seller', 'influencer', 'admin'],
+    default: ['buyer']
+  },
+  // Perfil de vendedor
+  sellerProfile: {
+    type: Object, // Puede contener storeName, phone, country, province, city, initialCategories, etc.
+    default: null,
+  },
+  // Perfil de influencer
+  influencerProfile: {
+    type: Object, // Puede contener username, social media, category, niches, etc.
+    default: null,
+  },
+  // Tiendas seguidas por el usuario
+  followingShops: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Shop',
+  }]
 });
 
 // Método para encriptar contraseña

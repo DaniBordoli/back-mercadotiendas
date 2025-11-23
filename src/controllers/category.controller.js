@@ -1,5 +1,7 @@
 const Category = require('../models/Category');
-const { successResponse, errorResponse } = require('../utils/response');
+const Subcategory = require('../models/Subcategory');
+const mongoose = require('mongoose');
+const { successResponse, errorResponse } = require('../utils/responseHelper');
 
 // Crear una nueva categoría
 exports.createCategory = async (req, res) => {
@@ -47,6 +49,16 @@ exports.getAllCategories = async (req, res) => {
   }
 };
 
+// Obtener categorías principales (público - sin autenticación)
+exports.getPublicMainCategories = async (req, res) => {
+  try {
+    const categories = await Category.find({ parent: { $exists: false } }).lean();
+    return successResponse(res, categories, 'Categorías principales obtenidas exitosamente');
+  } catch (error) {
+    return errorResponse(res, 'Error al obtener las categorías principales', 500, error.message);
+  }
+};
+
 // Obtener una categoría por ID
 exports.getCategoryById = async (req, res) => {
   try {
@@ -60,6 +72,39 @@ exports.getCategoryById = async (req, res) => {
     return successResponse(res, category, 'Categoría obtenida exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al obtener la categoría', 500, error.message);
+  }
+};
+
+// Obtener subcategorías por categoría padre
+exports.getSubcategoriesByParent = async (req, res) => {
+  try {
+    const { parentId } = req.params;
+
+    if (!parentId) {
+      return errorResponse(res, 'ID de categoría padre requerido', 400);
+    }
+
+    // Validar que el parentId sea un ObjectId válido
+    if (!mongoose.Types.ObjectId.isValid(parentId)) {
+      return errorResponse(res, 'ID de categoría padre inválido', 400);
+    }
+
+    // Verificar que la categoría padre existe
+    const parentCategory = await Category.findById(parentId);
+    if (!parentCategory) {
+      return errorResponse(res, 'Categoría padre no encontrada', 404);
+    }
+
+    // Buscar subcategorías usando la nueva colección
+    const subcategories = await Subcategory.findByCategory(parentId)
+      .select('_id name description isActive order')
+      .lean();
+    
+    console.log(`Subcategorías encontradas para categoría ${parentCategory.name} (${parentId}):`, subcategories.length);
+    return successResponse(res, subcategories, 'Subcategorías obtenidas exitosamente');
+  } catch (error) {
+    console.error('Error al obtener subcategorías:', error);
+    return errorResponse(res, 'Error al obtener subcategorías', 500, error.message);
   }
 };
 

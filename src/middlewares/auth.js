@@ -32,6 +32,9 @@ const verifyTokenMiddleware = async (req, res, next) => {
 
     // Agregar usuario al request
     req.user = user;
+    req.userId = user._id; // añadir el userId al request para uso en controladores
+    // MT-30: Adjuntar los tipos de usuario al request
+    req.userTypes = user.userType || ['buyer'];
     next();
   } catch (error) {
     return errorResponse(res, 'Authentication failed', 500, error.message);

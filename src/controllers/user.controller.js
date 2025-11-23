@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const { successResponse, errorResponse } = require('../utils/response');
+const { refreshYouTubeSubscribers } = require('../services/youtube.service');
 const cloudinaryService = require('../services/cloudinary.service');
 const multer = require('multer');
 
@@ -21,10 +22,15 @@ const getProfile = async (req, res) => {
   try {
     // Seleccionamos los campos específicos que queremos devolver
     const user = await User.findById(req.user.id)
-      .select('name email birthDate city province country role userPhone shop avatar')
+      .select('name email birthDate city province country userPhone shop avatar userType preferredAddress youtubeTokens sellerProfile influencerProfile')
       .populate('shop');
     if (!user) {
       return errorResponse(res, 'Usuario no encontrado', 404);
+    }
+
+    // Actualizar suscriptores de YouTube en segundo plano
+    if (user.youtubeTokens) {
+      refreshYouTubeSubscribers(user._id).catch(() => {});
     }
 
     return successResponse(res, { user }, 'Perfil obtenido exitosamente');
@@ -77,7 +83,7 @@ const updateAvatar = async (req, res) => {
 
 const updateProfile = async (req, res) => {
   try {
-    const { name, email, birthDate, city, province, country, userPhone } = req.body;
+    const { name, email, birthDate, city, province, country, userPhone, userType, preferredAddress, sellerProfile, influencerProfile } = req.body;
 
     // Verificar si el nuevo email ya está en uso
     if (email) {
@@ -100,6 +106,18 @@ const updateProfile = async (req, res) => {
     if (province) user.province = province;
     if (country) user.country = country;
     if (userPhone) user.userPhone = userPhone;
+    if (preferredAddress) user.preferredAddress = preferredAddress;
+    if (sellerProfile) user.sellerProfile = sellerProfile;
+    if (influencerProfile) user.influencerProfile = influencerProfile;
+    if (userType && Array.isArray(userType)) {
+      // Validar que todos los tipos sean válidos
+      const validTypes = ['buyer', 'seller', 'influencer', 'admin'];
+      const isValid = userType.every(type => validTypes.includes(type));
+      if (isValid) {
+        user.userType = userType;
+      }
+    }
+
 
     await user.save();
 

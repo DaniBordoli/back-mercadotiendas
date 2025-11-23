@@ -1,4 +1,6 @@
-const { ProductReview } = require('../models');
+const { ProductReview, Products, Shop } = require('../models');
+const NotificationService = require('../services/notification.service');
+const { NotificationTypes } = require('../constants/notificationTypes');
 const { successResponse, errorResponse } = require('../utils/response');
 
 // Crear una nueva reseña
@@ -17,6 +19,28 @@ const createReview = async (req, res) => {
 
     await review.save();
     await review.populate('userId', 'fullName name');
+
+    // Emitir notificación al dueño de la tienda si no es el autor de la reseña
+    try {
+      const io = req.app.get('io');
+      const product = await Products.findById(productId).populate('shop');
+      if (io && product && product.shop && product.shop.owner && product.shop.owner.toString() !== userId) {
+        await NotificationService.emitAndPersist(io, {
+          users: [product.shop.owner],
+          type: NotificationTypes.PRODUCT_REVIEW,
+          title: 'Nueva reseña recibida',
+          message: `Tu producto ${product.name} ha recibido una nueva reseña`,
+          entity: product._id,
+          data: {
+            productName: product.name || '',
+            rating: review.rating || 0,
+            reviewerName: review.userId?.fullName || review.userId?.name || 'Usuario'
+          },
+        });
+      }
+    } catch (notifyErr) {
+      console.error('Error enviando notificación de nueva reseña:', notifyErr);
+    }
 
     // Crear respuesta con userName para compatibilidad con frontend
     const reviewResponse = {
@@ -75,8 +99,125 @@ const deleteReview = async (req, res) => {
   }
 };
 
+// Registrar / actualizar voto útil (sí/no) sobre una reseña
+const voteReview = async (req, res) => {
+  try {
+    const { reviewId } = req.params;
+    const { vote } = req.body; // 'yes' | 'no'
+    const userId = req.user.id;
+
+    if (!['yes', 'no'].includes(vote)) {
+      return errorResponse(res, 'Parámetro "vote" inválido', 400);
+    }
+
+    const review = await ProductReview.findById(reviewId);
+    if (!review) {
+      return errorResponse(res, 'Reseña no encontrada', 404);
+    }
+
+    // Buscar si el usuario ya votó
+    const existing = review.helpfulVotes.find(v => v.userId.toString() === userId);
+
+    if (existing) {
+      if (existing.vote === vote) {
+        // Si es el mismo voto, eliminarlo (toggle off)
+        review.helpfulVotes = review.helpfulVotes.filter(v => v.userId.toString() !== userId);
+      } else {
+        // Si es distinto, actualizar el voto
+        existing.vote = vote;
+      }
+    } else {
+      // Agregar nuevo voto
+      review.helpfulVotes.push({ userId, vote });
+    }
+
+    await review.save();
+
+    // Calcular conteos
+    const yesVotes = review.helpfulVotes.filter(v => v.vote === 'yes').length;
+    const noVotes = review.helpfulVotes.filter(v => v.vote === 'no').length;
+
+    // Determinar el voto del usuario tras la operación
+    const updated = review.helpfulVotes.find(v => v.userId.toString() === userId);
+
+    return successResponse(res, {
+      reviewId: review._id,
+      yesVotes,
+      noVotes,
+      userVote: updated ? updated.vote : null,
+    }, 'Voto procesado correctamente');
+  } catch (error) {
+    console.error('Error procesando voto de reseña:', error);
+    return errorResponse(res, 'Error al procesar el voto', 500);
+  }
+};
+
+// Responder reseña (solo dueño de tienda)
+const replyReview = async (req, res) => {
+  try {
+    const { reviewId } = req.params;
+    const { text } = req.body;
+    const userId = req.user.id;
+
+    if (!text || !text.trim()) {
+      return errorResponse(res, 'El texto de la respuesta es obligatorio', 400);
+    }
+
+    // Obtener la reseña y el producto asociado
+    const review = await ProductReview.findById(reviewId);
+    if (!review) {
+      return errorResponse(res, 'Reseña no encontrada', 404);
+    }
+
+    const product = await Products.findById(review.productId).populate('shop');
+    if (!product) {
+      return errorResponse(res, 'Producto no encontrado', 404);
+    }
+
+    // Verificar que el usuario sea dueño de la tienda del producto
+    const shop = product.shop;
+    if (!shop || shop.owner.toString() !== userId) {
+      return errorResponse(res, 'No estás autorizado para responder esta reseña', 403);
+    }
+
+    // Guardar la respuesta en el campo reply
+    review.reply = {
+      userId,
+      text: text.trim(),
+      createdAt: new Date()
+    };
+
+    await review.save();
+    await review.populate('reply.userId', 'fullName name');
+
+    // Notificar al autor de la reseña si no es el mismo que responde
+    try {
+      const io = req.app.get('io');
+      if (io && review.userId.toString() !== userId) {
+        const productName = product?.name || 'tu producto';
+        await emitNotification(io, review.userId, {
+          type: 'review_reply',
+          title: 'Respuesta a tu reseña',
+          message: `El vendedor respondió tu reseña en ${productName}`,
+          entity: 'review',
+          data: { reviewId: review._id, productId: product._id },
+        });
+      }
+    } catch (notifyErr) {
+      console.error('Error enviando notificación de respuesta de reseña:', notifyErr);
+    }
+
+    successResponse(res, review.reply, 'Respuesta registrada exitosamente');
+  } catch (error) {
+    console.error('Error respondiendo reseña:', error);
+    errorResponse(res, 'Error al responder la reseña', 500);
+  }
+};
+
 module.exports = {
   createReview,
   getProductReviews,
-  deleteReview
+  deleteReview,
+  voteReview,
+  replyReview
 };

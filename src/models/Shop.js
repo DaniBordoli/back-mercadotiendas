@@ -15,9 +15,26 @@ const shopSchema = new mongoose.Schema({
     type: String,
     optional: true
   },
+  description: {
+    type: String,
+    default: ''
+  },
+  category: {
+    type: String,
+    default: 'other'
+  },
+  // Nuevos campos: arrays de categorías y subcategorías seleccionadas por el usuario
+  categories: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Category'
+  }],
+  subcategories: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Subcategory'
+  }],
   address: {
     type: String,
-    optional: true,
+    default: ''
   },
   contactEmail: {
     type: String,
@@ -25,38 +42,47 @@ const shopSchema = new mongoose.Schema({
   },
   shopPhone: {
     type: String,
-    optional: true
+    default: ''
   },
   taxAdress: {
     type: String,
-    Optional: true
+    default: ''
   },
   preferredCurrency: {
     type: String,
-    Optional: true
+    default: ''
   },
   languageMain: {
     type: String,
-    Optional: true
+    default: ''
   },
   province: {
     type: String,
-    Optional: true
+    default: ''
   },
   city: {
     type: String,
-    Optional: true
+    default: ''
   },
   country: {
     type: String,
-    Optional: true
+    default: ''
   },
   imageUrl: {
     type: String
   },
+  // Contador de seguidores
+  followers: {
+    type: Number,
+    default: 0
+  },
   templateUpdate: {
-    type: Object,
-    default: {}
+    type: mongoose.Schema.Types.Mixed,
+    default: () => ({})
+  },
+  templateConfigurations: {
+    type: mongoose.Schema.Types.Mixed,
+    default: () => ({})
   },
   active: {
     type: Boolean,

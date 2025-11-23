@@ -2,6 +2,8 @@ const Product = require('../models/Products');
 const { successResponse, errorResponse } = require('../utils/response');
 const cloudinaryService = require('../services/cloudinary.service');
 const multer = require('multer');
+const ProductVisit = require('../models/ProductVisit');
+const LiveEventMetrics = require('../models/LiveEventMetrics');
 
 // Configurar multer para manejar la carga de múltiples archivos en memoria para productos
 const uploadProductImages = multer({
@@ -14,7 +16,10 @@ const uploadProductImages = multer({
         }
         cb(null, true);
     }
-}).array('productImages', 10); // hasta 10 imágenes por vez
+}).fields([
+    { name: 'productImages', maxCount: 10 },
+    { name: 'variantImages', maxCount: 20 }
+]); // hasta 10 imágenes de producto y 20 de variantes
 
 // Crear producto con imágenes
 exports.createProduct = (req, res) => {
@@ -26,7 +31,8 @@ exports.createProduct = (req, res) => {
     }
 
     try {
-      const { nombre, descripcion, sku, estado, precio, categoria, stock, subcategoria } = req.body;
+      const { nombre, descripcion, sku, estado, precio, oldPrice, discount, categoria, stock, subcategoria, codigoBarras, tieneVariantes, largoCm, anchoCm, altoCm, pesoKg, customAttributes } = req.body;
+      let parsedCustomAttributes = customAttributes;
       
       // Procesar variantes
       let variantes = req.body.variantes;
@@ -39,14 +45,72 @@ exports.createProduct = (req, res) => {
       }
       if (!Array.isArray(variantes)) variantes = [];
 
+      // Procesar combinaciones de variantes
+      let combinacionesVariantes = req.body.combinacionesVariantes;
+      if (typeof combinacionesVariantes === 'string') {
+        try { 
+          combinacionesVariantes = JSON.parse(combinacionesVariantes); 
+        } catch { 
+          combinacionesVariantes = []; 
+        }
+      }
+      if (!Array.isArray(combinacionesVariantes)) combinacionesVariantes = [];
+
+      // Procesar atributos personalizados
+      if (typeof parsedCustomAttributes === 'string') {
+        try {
+          parsedCustomAttributes = JSON.parse(parsedCustomAttributes);
+        } catch {
+          parsedCustomAttributes = [];
+        }
+      }
+      if (!Array.isArray(parsedCustomAttributes)) parsedCustomAttributes = [];
+
+      // Convertir dimensiones y peso a números
+      const numLargo = Number(largoCm);
+      const numAncho = Number(anchoCm);
+      const numAlto = Number(altoCm);
+      const numPeso = Number(pesoKg);
+
+      // Validar que sean números válidos y no negativos
+      if ([numLargo, numAncho, numAlto, numPeso].some(v => isNaN(v) || v < 0)) {
+        return errorResponse(res, 'Las dimensiones y el peso deben ser números válidos y no negativos', 400);
+      }
+
       console.log('[createProduct] req.files:', req.files); // <-- Depuración
+      
+      // Subir imágenes principales a Cloudinary si existen
       let productImages = [];
-      if (req.files && req.files.length > 0) {
-        for (const file of req.files) {
+      if (req.files && req.files.productImages && req.files.productImages.length > 0) {
+        for (const file of req.files.productImages) {
           const imageUrl = await cloudinaryService.uploadImage(file.buffer, 'products');
           productImages.push(imageUrl);
         }
       }
+      
+      // Procesar imágenes de variantes si existen
+      let variantImageUrls = [];
+      if (req.files && req.files.variantImages && req.files.variantImages.length > 0) {
+        for (const file of req.files.variantImages) {
+          const imageUrl = await cloudinaryService.uploadImage(file.buffer, 'products/variants');
+          variantImageUrls.push(imageUrl);
+        }
+      }
+      
+      // Actualizar las URLs de imágenes en las combinaciones de variantes
+      if (combinacionesVariantes && combinacionesVariantes.length > 0 && variantImageUrls.length > 0) {
+        const variantImageIndexes = req.body.variantImageIndex;
+        const indexes = Array.isArray(variantImageIndexes) ? variantImageIndexes : [variantImageIndexes];
+        
+        let imageIndex = 0;
+        combinacionesVariantes.forEach((combo, index) => {
+          if (indexes.includes(String(index)) && imageIndex < variantImageUrls.length) {
+            combo.image = variantImageUrls[imageIndex];
+            imageIndex++;
+          }
+        });
+      }
+      
       console.log('[createProduct] productImages:', productImages); // <-- Depuración
 
       // Obtener la tienda del usuario autenticado
@@ -62,10 +126,20 @@ exports.createProduct = (req, res) => {
         estado,
         precio,
         categoria,
+        oldPrice,
+        discount,
         subcategoria,
         productImages,
         variantes,
+        tieneVariantes: tieneVariantes === 'true' || tieneVariantes === true,
+        combinacionesVariantes,
+        largoCm: numLargo,
+        anchoCm: numAncho,
+        altoCm: numAlto,
+        pesoKg: numPeso,
+        customAttributes: parsedCustomAttributes,
         stock: Number(stock), // Convertir stock a Number
+        codigoBarras: codigoBarras || '', // Agregar código de barras
         shop: user.shop 
       });
       await product.save();
@@ -94,6 +168,7 @@ exports.createProduct = (req, res) => {
 };
 
 
+// Obtener todos los productos activos
 exports.getProducts = async (req, res) => {
   try {
     const products = await Product.find({ estado: 'Activo' }).populate('shop', 'name');
@@ -103,13 +178,36 @@ exports.getProducts = async (req, res) => {
   }
 };
 
-// Nuevo método para obtener solo productos activos de una tienda
+// Obtener solo productos activos
 exports.getActiveProducts = async (req, res) => {
   try {
     const products = await Product.find({ estado: 'Activo' }).populate('shop', 'name');
     return successResponse(res, products, 'Productos activos obtenidos exitosamente');
   } catch (error) {
-    return errorResponse(res, 'Error al obtener los productos activos', 500, error.message);
+    return errorResponse(res, 'Error al obtener productos activos', 500);
+  }
+};
+
+// Obtener productos de la tienda del usuario autenticado (para gestión)
+exports.getMyProducts = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user || !user.shop) {
+      return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
+    }
+    
+    // Permitir obtener todos los productos de la tienda, opcionalmente filtrar por estado si se pasa como query ?estado=Activo
+    const { estado } = req.query;
+    const query = { shop: user.shop };
+    if (estado) {
+      query.estado = estado;
+    }
+
+    const products = await Product.find(query).populate('shop', 'name');
+    
+    return successResponse(res, products, 'Productos de la tienda obtenidos exitosamente');
+  } catch (error) {
+    return errorResponse(res, 'Error al obtener productos de la tienda', 500);
   }
 };
 
@@ -117,10 +215,35 @@ exports.getActiveProducts = async (req, res) => {
 exports.getProductById = async (req, res) => {
   try {
     const { id } = req.params;
-    const product = await Product.findById(id).populate('shop', 'name');
+    const product = await Product.findById(id).populate('shop', 'name imageUrl followers templateUpdate owner');
     if (!product) {
       return errorResponse(res, 'Producto no encontrado', 404);
     }
+
+    // Registrar la visita (no esperamos a que termine para responder)
+    if (product.shop) {
+      ProductVisit.create({ product: product._id, shop: product.shop }).catch(console.error);
+    }
+
+    // Incrementar clics en productos si se proporciona liveEventId
+    const { liveEventId } = req.query;
+    if (liveEventId) {
+      // Incrementar clics a nivel de evento (métrica agregada)
+      LiveEventMetrics.updateOne(
+        { event: liveEventId },
+        { $inc: { productClicks: 1 } },
+        { upsert: true }
+      ).catch(console.error);
+
+      // Incrementar clics por producto destacado dentro del evento
+      const LiveEventProductMetrics = require('../models/LiveEventProductMetrics');
+      LiveEventProductMetrics.updateOne(
+        { event: liveEventId, product: product._id },
+        { $inc: { clicks: 1 } },
+        { upsert: true }
+      ).catch(console.error);
+    }
+
     return successResponse(res, product, 'Producto obtenido exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al obtener el producto', 500, error.message);
@@ -136,7 +259,8 @@ exports.updateProduct = async (req, res) => {
       return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
     }
     // Solo permitir los campos editables
-    const allowedFields = ['nombre', 'sku', 'descripcion', 'precio', 'stock', 'categoria', 'estado', 'productImages', 'variantes'];
+    const allowedFields = ['nombre', 'sku', 'descripcion', 'precio', 'oldPrice', 'discount', 'stock', 'categoria', 'subcategoria', 'estado', 'productImages', 'variantes', 'codigoBarras', 'largoCm', 'anchoCm', 'altoCm', 'pesoKg', 'customAttributes'];
+    const numericFields = ['stock', 'largoCm', 'anchoCm', 'altoCm', 'pesoKg'];
     const updates = {};
     allowedFields.forEach(field => {
       if (req.body[field] !== undefined) {
@@ -148,8 +272,15 @@ exports.updateProduct = async (req, res) => {
           }
           if (!Array.isArray(value)) value = [];
           updates[field] = value;
-        } else if (field === 'stock') { // Asegurar que el stock se convierta a número
+        } else if (numericFields.includes(field)) { // Convertir campos numéricos a Number
           updates[field] = Number(req.body[field]);
+        } else if (field === 'customAttributes') {
+          let value = req.body[field];
+          if (typeof value === 'string') {
+            try { value = JSON.parse(value); } catch { value = []; }
+          }
+          if (!Array.isArray(value)) value = [];
+          updates[field] = value;
         } else {
           updates[field] = req.body[field];
         }
@@ -193,7 +324,8 @@ exports.addProductImages = async (req, res) => {
         }
 
         try {
-            if (!req.files || req.files.length === 0) {
+            const uploadedFiles = req.files && (req.files.productImages || req.files);
+            if (!uploadedFiles || uploadedFiles.length === 0) {
                 return errorResponse(res, 'No se subió ningún archivo', 400);
             }
 
@@ -209,7 +341,8 @@ exports.addProductImages = async (req, res) => {
 
             // Subir todas las imágenes a Cloudinary y agregar las URLs al array
             const urls = [];
-            for (const file of req.files) {
+            const imagesToUpload = req.files.productImages || req.files || [];
+            for (const file of imagesToUpload) {
                 const imageUrl = await cloudinaryService.uploadImage(file.buffer, 'products');
                 urls.push(imageUrl);
             }
@@ -230,6 +363,12 @@ exports.addProductImages = async (req, res) => {
  */
 exports.updateProductStock = async (productId, quantityToReduce) => {
   try {
+    // Validar que productId sea un ObjectId válido
+    if (!productId || !productId.toString().match(/^[0-9a-fA-F]{24}$/)) {
+      console.warn(`[Stock Update] ProductId inválido: ${productId}`);
+      return { success: false, message: 'ProductId inválido' };
+    }
+
     const product = await Product.findById(productId);
 
     if (!product) {
@@ -239,7 +378,7 @@ exports.updateProductStock = async (productId, quantityToReduce) => {
 
     if (product.stock < quantityToReduce) {
       console.warn(`[Stock Update] Stock insuficiente para producto ${productId}. Stock actual: ${product.stock}, intento de reducir: ${quantityToReduce}`);
-      // Opcional: Podríamos lanzar un error aquí si el stock insuficiente es un error crítico
+      // No lanzar error, solo advertir y continuar
       return { success: false, message: 'Stock insuficiente' };
     }
 
@@ -249,7 +388,8 @@ exports.updateProductStock = async (productId, quantityToReduce) => {
     return { success: true, newStock: product.stock };
   } catch (error) {
     console.error(`[Stock Update] Error al actualizar stock para producto ${productId}:`, error);
-    throw new Error(`Error al actualizar stock: ${error.message}`);
+    // No lanzar error, solo loggearlo y continuar
+    return { success: false, message: `Error al actualizar stock: ${error.message}` };
   }
 };
 
@@ -287,7 +427,7 @@ exports.deleteProductImage = async (req, res) => {
 // Obtener todos los productos (sin filtrar por tienda) - solo productos activos
 exports.getAllProducts = async (req, res) => {
   try {
-    const products = await Product.find({ estado: 'Activo' }).populate('shop', 'name');
+    const products = await Product.find({ estado: 'Activo' }).populate('shop', 'name imageUrl followers templateUpdate');
     return successResponse(res, products, 'Todos los productos obtenidos exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al obtener todos los productos', 500, error.message);
@@ -313,3 +453,42 @@ exports.getProductsByShop = async (req, res) => {
     return errorResponse(res, 'Error al obtener los productos de la tienda', 500, error.message);
   }
 };
+
+// Obtener el total de visitas del mes actual para la tienda del usuario autenticado
+exports.getMonthlyVisits = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user || !user.shop) {
+      return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
+    }
+
+    // Calcular inicio y fin del mes actual
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+    const resultado = await ProductVisit.aggregate([
+      {
+        $match: {
+          shop: user.shop,
+          visitedAt: {
+            $gte: startOfMonth,
+            $lte: endOfMonth
+          }
+        }
+      },
+      {
+        $count: 'total'
+      }
+    ]);
+
+    const totalVisitasMes = resultado.length > 0 ? resultado[0].total : 0;
+
+    return successResponse(res, { totalVisitasMes }, 'Visitas del mes obtenidas exitosamente');
+  } catch (error) {
+    return errorResponse(res, 'Error al obtener las visitas del mes', 500, error.message);
+  }
+};
+
+// appended at end
+exports.getProductByIdPublic = exports.getProductById;
