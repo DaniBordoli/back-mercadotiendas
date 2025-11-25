@@ -21,7 +21,10 @@ exports.getShopSocial = async (req, res) => {
   try {
     const { shopId } = req.params;
     const social = await ShopSocial.findOne({ shop: shopId });
-    if (!social) return res.status(404).json({ message: 'No social data found' });
+    if (!social) {
+      const created = await ShopSocial.create({ shop: shopId });
+      return res.json(created);
+    }
     res.json(social);
   } catch (err) {
     res.status(500).json({ error: err.message });

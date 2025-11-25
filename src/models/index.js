@@ -10,6 +10,10 @@ const ProductVisit = require('./ProductVisit');
 const LiveEventMetrics = require('./LiveEventMetrics');
 const LiveEventProductMetrics = require('./LiveEventProductMetrics');
 const ProductReview = require('./ProductReview');
+const Claim = require('./Claim');
+const Dispute = require('./Dispute');
+const DisputeMessage = require('./DisputeMessage');
+const DisputeReason = require('./DisputeReason');
 
 module.exports = {
   User,
@@ -24,5 +28,9 @@ module.exports = {
   LiveEventMetrics,
   LiveEventProductMetrics,
   ProductReview
+  , Claim
+  , Dispute
+  , DisputeMessage
+  , DisputeReason
 };
 

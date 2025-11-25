@@ -25,6 +25,8 @@ const supportRoutes = require('./support.routes');
 const influencerRoutes = require('./influencer');
 const tiktokAuthRoutes = require('./tiktok.routes');
 const youtubeAuthRoutes = require('./youtube.routes');
+const claimsRoutes = require('./claims.routes');
+const disputeRoutes = require('./dispute.routes');
 
 // Rutas de autenticación (/api/auth/*)
 router.use('/auth', authRoutes);
@@ -96,6 +98,8 @@ router.use('/uploads', uploadRoutes);
 
 // Rutas de soporte (/api/support/*)
 router.use('/support', supportRoutes);
+router.use('/claims', claimsRoutes);
+router.use('/disputes', disputeRoutes);
 
 // Rutas de influencer (/api/users/* y /api/admin/influencer/*)
 router.use('/', influencerRoutes);

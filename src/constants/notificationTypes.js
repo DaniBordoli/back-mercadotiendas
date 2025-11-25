@@ -9,6 +9,8 @@ const NotificationTypes = {
   PAYMENT: 'payment',
   PRODUCT_REVIEW: 'product_review',
   QUESTION: 'question',
+  CLAIM: 'claim',
+  DISPUTE: 'dispute',
 
   // Campañas e Influencers
   CAMPAIGN: 'campaign',

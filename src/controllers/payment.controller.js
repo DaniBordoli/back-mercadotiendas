@@ -49,7 +49,7 @@ const createOrderCheckout = async (req, res) => {
 
     // Obtener información de los productos y sus tiendas
     const productIds = items.map((item) => item.productId);
-    const products = await require('../models/Products').find({ _id: { $in: productIds } }).populate('shop', 'name mobbexApiKey mobbexAccessToken');
+    const products = await require('../models/Products').find({ _id: { $in: productIds } }).populate('shop', 'name owner mobbexApiKey mobbexAccessToken');
 
     if (!products || products.length === 0) {
       return errorResponse(res, 'No se encontraron los productos especificados', 400);
@@ -113,11 +113,17 @@ const createOrderCheckout = async (req, res) => {
       await newPayment.save();
       console.log('=== BACKEND: Registro de pago creado exitosamente en DB local con MockId:', newPayment._id, '===');
 
-      // Emitir notificación al vendedor sobre la nueva orden
+      // Emitir notificación al vendedor/es sobre la nueva orden
       try {
         const io = req.app.get('io');
-        if (io && checkoutShop.owner) {
-          await emitNotification(io, checkoutShop.owner, {
+        // Notificar a todos los dueños involucrados en la orden
+        const ownerIds = Array.from(new Set(
+          products
+            .map(p => (p?.shop?.owner ? p.shop.owner.toString() : ''))
+            .filter(Boolean)
+        ));
+        for (const ownerId of ownerIds) {
+          await emitNotification(io, ownerId, {
             type: 'order',
             title: 'Nueva orden recibida',
             message: `Se ha creado la orden ${orderData.reference}`,
@@ -297,11 +303,15 @@ const handleWebhook = async (req, res) => {
                 }))
               },
             });
-            // Obtener vendedor (dueño de la tienda del primer producto)
-            const firstProduct = await ProductModel.findById(payment.items[0].productId).populate('shop', 'owner');
-            if (firstProduct && firstProduct.shop && firstProduct.shop.owner) {
+            // Notificar a todos los vendedores involucrados (no solo el primer producto)
+            const productIdsInPayment = (payment.items || []).map(i => i.productId).filter(Boolean);
+            const prods = await ProductModel.find({ _id: { $in: productIdsInPayment } }).populate('shop', 'owner');
+            const sellerIds = Array.from(new Set(
+              prods.map(p => (p?.shop?.owner ? p.shop.owner.toString() : '')).filter(Boolean)
+            ));
+            if (sellerIds.length) {
               await NotificationService.emitAndPersist(io, {
-                users: [firstProduct.shop.owner],
+                users: sellerIds,
                 type: NotificationTypes.PAYMENT,
                 title: 'Pago recibido',
                 message: `Has recibido un pago por la orden ${payment.reference}`,
@@ -352,11 +362,41 @@ const getUserPayments = async (req, res) => {
     
     const payments = await Payment.find({ user: userId })
       .sort({ createdAt: -1 })
+      .populate('user', 'name email')
       .lean();
     
     return successResponse(res, payments, 'Historial de pagos obtenido exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al obtener el historial de pagos', 500, error.message);
+  }
+};
+
+/**
+ * Obtiene el historial de pagos que corresponden a productos de la tienda del usuario autenticado (vendedor)
+ * @param {Object} req - Request
+ * @param {Object} res - Response
+ */
+const getSellerPayments = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    // Buscar la tienda del usuario
+    const shop = await Shop.findOne({ owner: userId }).lean();
+    if (!shop) {
+      return successResponse(res, [], 'El usuario no tiene tienda');
+    }
+    // Obtener los productos de la tienda
+    const productIds = (await ProductModel.find({ shop: shop._id }).select('_id').lean()).map(p => p._id);
+    if (!productIds.length) {
+      return successResponse(res, [], 'La tienda no tiene productos');
+    }
+    // Buscar pagos que incluyan items de estos productos
+    const payments = await Payment.find({ 'items.productId': { $in: productIds } })
+      .sort({ createdAt: -1 })
+      .populate('user', 'name email')
+      .lean();
+    return successResponse(res, payments, 'Historial de pagos del vendedor obtenido exitosamente');
+  } catch (error) {
+    return errorResponse(res, 'Error al obtener el historial de pagos del vendedor', 500, error.message);
   }
 };
 
@@ -459,6 +499,58 @@ const completeMockPayment = async (req, res) => {
       }
     }
 
+    // Emitir notificaciones similares al webhook cuando el pago fue aprobado
+    try {
+      if (paymentInfo.status.code === '2') {
+        const io = req.app.get('io');
+        if (io) {
+          // Notificar al comprador
+          await NotificationService.emitAndPersist(io, {
+            users: [payment.user],
+            type: NotificationTypes.PAYMENT,
+            title: 'Pago aprobado',
+            message: `Tu pago para la orden ${payment.reference} ha sido acreditado exitosamente`,
+            entity: payment._id,
+            data: {
+              reference: payment.reference,
+              amount: payment.amount,
+              items: (payment.items || []).map(i => ({
+                productName: i.productName,
+                quantity: i.quantity,
+                shopName: i.shopName
+              }))
+            },
+          });
+          // Notificar a todos los vendedores involucrados
+          const productIdsInPayment = (payment.items || []).map(i => i.productId).filter(Boolean);
+          const prods = await ProductModel.find({ _id: { $in: productIdsInPayment } }).populate('shop', 'owner');
+          const sellerIds = Array.from(new Set(
+            prods.map(p => (p?.shop?.owner ? p.shop.owner.toString() : '')).filter(Boolean)
+          ));
+          if (sellerIds.length) {
+            await NotificationService.emitAndPersist(io, {
+              users: sellerIds,
+              type: NotificationTypes.PAYMENT,
+              title: 'Pago recibido',
+              message: `Has recibido un pago por la orden ${payment.reference}`,
+              entity: payment._id,
+              data: {
+                reference: payment.reference,
+                amount: payment.amount,
+                items: (payment.items || []).map(i => ({
+                  productName: i.productName,
+                  quantity: i.quantity,
+                  shopName: i.shopName
+                }))
+              },
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error al emitir notificaciones en pago mock:', e);
+    }
+
     return successResponse(res, {
       payment: payment,
       message: 'Pago mock completado exitosamente'
@@ -490,6 +582,7 @@ module.exports = {
   getPaymentStatus,
   handleWebhook,
   getUserPayments,
+  getSellerPayments,
   getMobbexConnectUrl,
   getMobbexCredentials,
   completeMockPayment

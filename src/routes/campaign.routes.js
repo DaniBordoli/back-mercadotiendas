@@ -42,4 +42,7 @@ router.patch('/:id/step3', verifyToken, campaignController.updateCampaign);
 // PATCH /api/campaigns/:id/status - Actualizar estado de una campaña (requiere autenticación)
 router.patch('/:id/status', verifyToken, campaignController.updateCampaignStatus);
 
+// POST /api/campaigns/:id/invite - Invitar a influencer a campaña
+router.post('/:id/invite', verifyToken, campaignController.inviteInfluencer);
+
 module.exports = router;

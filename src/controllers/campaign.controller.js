@@ -1,4 +1,6 @@
 const { Campaign, Shop, User } = require('../models');
+const NotificationService = require('../services/notification.service');
+const { NotificationTypes } = require('../constants/notificationTypes');
 const mongoose = require('mongoose');
 const { validationResult } = require('express-validator');
 
@@ -427,5 +429,48 @@ exports.updateCampaignStatus = async (req, res) => {
       message: 'Error al actualizar el estado de la campaña',
       error: error.message
     });
+  }
+};
+
+exports.inviteInfluencer = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { influencerId, message } = req.body || {};
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'ID de campaña inválido' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(influencerId)) {
+      return res.status(400).json({ success: false, message: 'ID de influencer inválido' });
+    }
+    const campaign = await Campaign.findById(id).populate('shop', 'name owner');
+    if (!campaign) return res.status(404).json({ success: false, message: 'Campaña no encontrada' });
+    if (campaign.status !== 'active') return res.status(400).json({ success: false, message: 'Solo se puede invitar a campañas activas' });
+
+    const user = await User.findById(req.user.id).populate('shop');
+    if (!user.shop || !campaign.shop || !campaign.shop._id.equals(user.shop._id)) {
+      return res.status(403).json({ success: false, message: 'No tienes permiso para invitar a esta campaña' });
+    }
+
+    try {
+      const io = req.app.get('io');
+      await NotificationService.emitAndPersist(io, {
+        users: [influencerId],
+        type: NotificationTypes.OFFER,
+        title: 'Invitación a campaña',
+        message: message || `Te invitaron a participar en la campaña ${campaign.name}`,
+        entity: campaign._id,
+        data: {
+          campaignId: String(campaign._id),
+          campaignName: campaign.name,
+          shopName: campaign.shop?.name || '',
+          influencerId: String(influencerId)
+        }
+      });
+    } catch (e) {}
+
+    return res.status(200).json({ success: true, message: 'Invitación enviada' });
+  } catch (error) {
+    console.error('Error invitando a campaña:', error);
+    return res.status(500).json({ success: false, message: 'Error invitando a campaña', error: error.message });
   }
 };
