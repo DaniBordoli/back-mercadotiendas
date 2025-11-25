@@ -24,7 +24,8 @@ const NotificationTypes = {
   LIVE_METRICS: 'live_metrics',
 
   // Sistema
-  SYSTEM: 'system'
+  SYSTEM: 'system',
+  CONTACT_MESSAGE: 'contact_message'
 };
 
 module.exports = { NotificationTypes };

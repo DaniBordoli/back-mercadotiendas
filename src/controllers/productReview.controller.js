@@ -29,10 +29,10 @@ const createReview = async (req, res) => {
           users: [product.shop.owner],
           type: NotificationTypes.PRODUCT_REVIEW,
           title: 'Nueva reseña recibida',
-          message: `Tu producto ${product.name} ha recibido una nueva reseña`,
+          message: `Tu producto ${(product.nombre || product.name || '')} ha recibido una nueva reseña`,
           entity: product._id,
           data: {
-            productName: product.name || '',
+            productName: (product.nombre || product.name || ''),
             rating: review.rating || 0,
             reviewerName: review.userId?.fullName || review.userId?.name || 'Usuario'
           },
