@@ -28,6 +28,7 @@ const youtubeAuthRoutes = require('./youtube.routes');
 const claimsRoutes = require('./claims.routes');
 const disputeRoutes = require('./dispute.routes');
 const contactMessageRoutes = require('./contactMessage.routes');
+const favoritesRoutes = require('./favorites.routes');
 
 // Rutas de autenticación (/api/auth/*)
 router.use('/auth', authRoutes);
@@ -102,6 +103,7 @@ router.use('/support', supportRoutes);
 router.use('/claims', claimsRoutes);
 router.use('/disputes', disputeRoutes);
 router.use('/contact-messages', contactMessageRoutes);
+router.use('/favorites', favoritesRoutes);
 
 // Rutas de influencer (/api/users/* y /api/admin/influencer/*)
 router.use('/', influencerRoutes);

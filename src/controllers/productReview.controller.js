@@ -61,14 +61,15 @@ const getProductReviews = async (req, res) => {
     const { productId } = req.params;
 
     const reviews = await ProductReview.find({ productId })
-      .populate('userId', 'fullName name')
+      .populate('userId', 'fullName name avatar')
       .sort({ createdAt: -1 });
 
     // Asegurar que reviews es un array y transformar respuesta para incluir userName
     const reviewsArray = Array.isArray(reviews) ? reviews : [];
     const reviewsWithUserName = reviewsArray.map(review => ({
       ...review.toObject(),
-      userName: review.userId?.fullName || review.userId?.name || 'Usuario Anónimo'
+      userName: review.userId?.fullName || review.userId?.name || 'Usuario Anónimo',
+      userAvatar: review.userId?.avatar || null
     }));
 
     successResponse(res, reviewsWithUserName, 'Reseñas obtenidas exitosamente');
