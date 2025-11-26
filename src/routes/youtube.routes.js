@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const { google } = require('googleapis');
+const axios = require('axios');
 const User = require('../models/User');
 
 // Credentials from env
@@ -164,6 +165,81 @@ router.get('/live/preview', verifyToken, async (req, res) => {
   } catch (err) {
     console.error('[YouTubeAuth] Error obteniendo vista previa live', err.response?.data || err.message);
     return res.status(500).json({ success: false, message: 'Error obteniendo vista previa de YouTube Live' });
+  }
+});
+
+router.get('/live/stats', verifyToken, async (req, res) => {
+  try {
+    const { broadcastId } = req.query;
+    if (!broadcastId) {
+      return res.status(400).json({ success: false, message: 'broadcastId es requerido' });
+    }
+    const apiKey = process.env.YT_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ success: false, message: 'YT_API_KEY no configurada en el backend' });
+    }
+
+    let lifecycleStatus = undefined;
+    let videoId = String(broadcastId);
+
+    try {
+      const { getAuthorizedClient } = require('../services/youtube.service');
+      const authClient = await getAuthorizedClient(req.user.id);
+      const yt = google.youtube({ version: 'v3', auth: authClient });
+      const { data: bData } = await yt.liveBroadcasts.list({
+        part: ['status', 'contentDetails'],
+        id: [String(broadcastId)],
+      });
+      if (bData.items && bData.items.length > 0) {
+        const b = bData.items[0];
+        lifecycleStatus = b.status?.lifeCycleStatus;
+        videoId = b.contentDetails?.boundStreamId || videoId;
+      }
+    } catch (e) {}
+
+    const { data } = await axios.get('https://www.googleapis.com/youtube/v3/videos', {
+      params: {
+        part: 'liveStreamingDetails,statistics',
+        id: videoId,
+        key: apiKey,
+      },
+    });
+    if (!data.items || data.items.length === 0) {
+      return res.status(404).json({ success: false, message: 'No se encontraron datos para el broadcast' });
+    }
+    const item = data.items[0];
+    const viewerCount = Number(item?.liveStreamingDetails?.concurrentViewers || 0);
+    const actualStartTime = item?.liveStreamingDetails?.actualStartTime || null;
+
+    let commentCount = Number(item?.statistics?.commentCount || 0);
+    const liveChatId = item?.liveStreamingDetails?.activeLiveChatId;
+    if (liveChatId && apiKey) {
+      try {
+        let total = 0;
+        let pageToken = undefined;
+        for (let i = 0; i < 3; i++) {
+          const { data: chatData } = await axios.get('https://www.googleapis.com/youtube/v3/liveChat/messages', {
+            params: {
+              part: 'id',
+              liveChatId,
+              key: apiKey,
+              maxResults: 200,
+              ...(pageToken ? { pageToken } : {}),
+            },
+          });
+          const itemsCount = Array.isArray(chatData.items) ? chatData.items.length : 0;
+          total += itemsCount;
+          pageToken = chatData.nextPageToken;
+          if (!pageToken) break;
+        }
+        if (total > 0) commentCount = total;
+      } catch (e) {}
+    }
+
+    return res.json({ success: true, stats: { viewerCount, actualStartTime, commentCount, lifecycleStatus } });
+  } catch (err) {
+    console.error('[YouTubeAuth] Error obteniendo estadísticas live', err.response?.data || err.message);
+    return res.status(500).json({ success: false, message: 'Error obteniendo estadísticas de YouTube Live' });
   }
 });
 

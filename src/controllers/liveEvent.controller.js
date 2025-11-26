@@ -84,38 +84,86 @@ exports.getCampaignSummary = async (req, res) => {
     const eventIds = events.map(e => e._id);
     const campaignMap = new Map(events.map(e => [e._id.toString(), e.campaign]));
 
-    // Obtener métricas de eventos
-    const metrics = await LiveEventMetrics.find({ event: { $in: eventIds } }).select('event revenue salesAmount');
+    // Obtener métricas de eventos y por producto
+    const metrics = await LiveEventMetrics.find({ event: { $in: eventIds } }).select('event uniqueViewers productClicks purchases revenue salesAmount ctr');
+    const LiveEventProductMetrics = require('../models/LiveEventProductMetrics');
+    const productMetrics = await LiveEventProductMetrics.find({ event: { $in: eventIds } }).select('event cartAdds purchases revenue');
 
-    // Agrupar ingresos por campaña
-    const revenueByCampaign = new Map();
+    // Agregados por campaña para KPIs y revenue
+    const aggByCampaign = new Map();
+    const ensureAgg = (cid) => {
+      const k = cid.toString();
+      if (!aggByCampaign.has(k)) {
+        aggByCampaign.set(k, { uniqueViewers: 0, productClicks: 0, cartAdds: 0, purchases: 0, revenue: 0 });
+      }
+      return aggByCampaign.get(k);
+    };
     metrics.forEach(m => {
       const campaignId = campaignMap.get((m.event || '').toString());
       if (!campaignId) return;
-      const existing = revenueByCampaign.get(campaignId.toString()) || 0;
-      revenueByCampaign.set(campaignId.toString(), existing + Number(m.revenue || m.salesAmount || 0));
+      const agg = ensureAgg(campaignId);
+      agg.uniqueViewers += Number(m.uniqueViewers || 0);
+      agg.productClicks += Number(m.productClicks || 0);
+      agg.purchases += Number(m.purchases || 0);
+      agg.revenue += Number(m.revenue || m.salesAmount || 0);
+    });
+    productMetrics.forEach(pm => {
+      const campaignId = campaignMap.get((pm.event || '').toString());
+      if (!campaignId) return;
+      const agg = ensureAgg(campaignId);
+      agg.cartAdds += Number(pm.cartAdds || 0);
+      agg.purchases += Number(pm.purchases || 0);
+      agg.revenue += Number(pm.revenue || 0);
     });
 
-    const campaignIds = Array.from(revenueByCampaign.keys());
+    const campaignIds = Array.from(aggByCampaign.keys());
     const Campaign = require('../models/Campaign');
-    const campaigns = await Campaign.find({ _id: { $in: campaignIds } }).select('name milestones');
+    const campaigns = await Campaign
+      .find({ _id: { $in: campaignIds } })
+      .select('name milestones kpis status shop')
+      .populate('shop', 'name');
 
     const result = campaigns.map(c => {
       const milestones = c.milestones || [];
       const completed = milestones.filter(m => m.completedAt).length; // completedAt puede no existir
+      const kpisObj = c.kpis || {};
+      const selectedKeys = Object.keys(kpisObj).filter(k => kpisObj[k]?.selected);
+      const kpiMapping = { viewers: 'uniqueViewers', clicks: 'productClicks', sales: 'purchases', addtocart: 'cartAdds', ctr: 'ctr', revenue: 'revenue' };
+      const agg = aggByCampaign.get(c._id.toString()) || { uniqueViewers: 0, productClicks: 0, cartAdds: 0, purchases: 0, revenue: 0 };
+      const ctrBase = agg.uniqueViewers > 0 ? agg.uniqueViewers : 0;
+      const ctrAgg = ctrBase > 0 ? +(agg.productClicks * 100 / ctrBase).toFixed(2) : 0;
+      const currentByKey = {
+        viewers: agg.uniqueViewers,
+        clicks: agg.productClicks,
+        sales: agg.purchases,
+        addtocart: agg.cartAdds,
+        ctr: ctrAgg,
+        revenue: agg.revenue,
+      };
+      const kpisCompleted = selectedKeys.filter(k => {
+        const target = Number(kpisObj[k]?.target || 0);
+        const current = Number(currentByKey[k] || 0);
+        return target > 0 ? current >= target : false;
+      }).length;
+      const isCompleted = selectedKeys.length > 0 ? (kpisCompleted === selectedKeys.length) : (completed > 0 && completed === milestones.length) || (c.status === 'closed');
       return {
         campaignId: c._id,
         name: c.name,
-        revenue: revenueByCampaign.get(c._id.toString()) || 0,
+        revenue: agg.revenue || 0,
         milestonesCompleted: completed,
         milestonesTotal: milestones.length,
+        kpisSelected: selectedKeys,
+        kpisCompleted,
+        status: c.status,
+        brand: (c.shop && c.shop.name) || undefined,
+        completed: !!isCompleted,
       };
     });
 
     // Incluir campañas que no se encuentren en la consulta Campaign (poco probable)
-    revenueByCampaign.forEach((rev, id) => {
+    aggByCampaign.forEach((agg, id) => {
       if (!result.find(r => r.campaignId.toString() === id)) {
-        result.push({ campaignId: id, name: 'Campaña', revenue: rev, milestonesCompleted: 0, milestonesTotal: 0 });
+        result.push({ campaignId: id, name: 'Campaña', revenue: agg.revenue || 0, milestonesCompleted: 0, milestonesTotal: 0, kpisSelected: [], kpisCompleted: 0, status: '-', completed: false });
       }
     });
 
@@ -676,15 +724,99 @@ exports.updateMetrics = async (req, res) => {
       }
     }
 
+    let kpiProgressPayload = null;
+    let campaignPayload = null;
+    try {
+      const liveEvent = await LiveEvent.findById(id).select('campaign');
+      if (liveEvent && liveEvent.campaign) {
+        const Campaign = require('../models/Campaign');
+        const campaignDoc = await Campaign.findById(liveEvent.campaign);
+        if (campaignDoc) {
+          const kpiMapping = {
+            viewers: 'uniqueViewers',
+            clicks: 'productClicks',
+            sales: 'purchases',
+            addtocart: 'cartAdds',
+            ctr: 'ctr',
+            revenue: 'revenue',
+          };
+          const kpiLabels = {
+            viewers: 'Espectadores',
+            clicks: 'Clics',
+            sales: 'Ventas',
+            addtocart: 'Carritos',
+            ctr: 'CTR',
+            revenue: 'Ingresos',
+          };
+          const kpiProgress = {};
+          for (const [kpiKey, cfg] of Object.entries(campaignDoc.kpis || {})) {
+            if (!cfg || !cfg.selected) continue;
+            const field = kpiMapping[kpiKey];
+            const currentVal = field ? Number(metrics[field] || 0) : 0;
+            const targetVal = Number(cfg.target || 0);
+            const pct = targetVal > 0 ? Math.min(100, Math.round((currentVal / targetVal) * 100)) : 0;
+            kpiProgress[kpiKey] = { target: targetVal, current: currentVal, progress: pct };
+
+            const incFieldMap = {
+              viewers: 'uniqueViewers',
+              clicks: 'productClicks',
+              sales: 'purchases',
+              addtocart: 'cartAdds',
+              revenue: 'salesAmount',
+            };
+            const incField = incFieldMap[kpiKey];
+            const incChanged = incField ? Number((req.body || {})[incField] || 0) > 0 : false;
+            const reached = targetVal > 0 && currentVal >= targetVal;
+            if (incChanged && reached) {
+              newActivityEntries.push({
+                type: 'milestone',
+                message: `Milestone alcanzado: ${kpiLabels[kpiKey]} ${currentVal}/${targetVal}`,
+                ts: new Date(),
+              });
+
+              try {
+                const idx = (campaignDoc.milestones || []).findIndex(m => m.kpiKey === kpiKey && !m.completedAt);
+                if (idx > -1) {
+                  campaignDoc.milestones[idx].completedAt = new Date();
+                  await campaignDoc.save();
+                }
+              } catch (saveErr) {}
+            }
+          }
+          // Si todos los milestones están completados, cerrar campaña
+          try {
+            const milestonesArr = campaignDoc.milestones || [];
+            const allCompleted = milestonesArr.length > 0 && milestonesArr.every(m => !!m.completedAt);
+            if (allCompleted && campaignDoc.status !== 'closed') {
+              campaignDoc.status = 'closed';
+              await campaignDoc.save();
+            }
+          } catch (e) {}
+          kpiProgressPayload = kpiProgress;
+          campaignPayload = {
+            _id: campaignDoc._id,
+            name: campaignDoc.name,
+            status: campaignDoc.status,
+            milestones: (campaignDoc.milestones || []).map(m => ({
+              name: m.name,
+              description: m.description,
+              date: m.date,
+              kpiKey: m.kpiKey,
+              completedAt: m.completedAt
+            }))
+          };
+        }
+      }
+    } catch (e) {}
+
     // Emitir evento a través de Socket.IO para actualizar en tiempo real
     try {
       const io = req.app.get('io');
       if (io) {
-        // Emitir a sala específica del evento para limitar audiencia
-        io.to(`event_${id}`).emit('metricsUpdate', { eventId: id, metrics });
-        // Compatibilidad legacy
-        io.to(`event_${id}`).emit('metricsUpdated', { eventId: id, metrics });
+        io.to(`event_${id}`).emit('metricsUpdate', { eventId: id, metrics, kpiProgress: kpiProgressPayload, campaign: campaignPayload });
+        io.to(`event_${id}`).emit('metricsUpdated', { eventId: id, metrics, kpiProgress: kpiProgressPayload, campaign: campaignPayload });
 
+        
         // Emitir feed de actividad recién generado
         if (newActivityEntries.length > 0) {
           io.to(`event_${id}`).emit('activityEvent', {
@@ -832,6 +964,8 @@ exports.getAggregatedSummary = async (req, res) => {
     const events = await LiveEvent.find({ owner: userId, startDateTime: { $gte: start }, ...platformFilter }).select('_id status startDateTime');
     const eventIds = events.map(e => e._id);
     const metrics = await LiveEventMetrics.find({ event: { $in: eventIds } });
+    const LiveEventProductMetrics = require('../models/LiveEventProductMetrics');
+    const productMetricsCurr = await LiveEventProductMetrics.find({ event: { $in: eventIds } });
 
     const livesEmitted = events.length;
     let durationSeconds = 0;
@@ -855,11 +989,15 @@ exports.getAggregatedSummary = async (req, res) => {
       uniqueViewers += Number(m.uniqueViewers || 0);
       views += Number(m.views || 0);
       productClicks += Number(m.productClicks || 0);
-      cartAdds += Number(m.cartAdds || 0);
-      purchases += Number(m.purchases || 0);
       revenue += Number(m.revenue || m.salesAmount || 0);
       comments += Number(m.comments || 0);
       newFollowers += Number(m.newFollowers || 0);
+    });
+
+    productMetricsCurr.forEach(pm => {
+      cartAdds += Number(pm.cartAdds || 0);
+      purchases += Number(pm.purchases || 0);
+      revenue += Number(pm.revenue || 0);
     });
 
     const avgConcurrentViewers = avgConcurrentWeight > 0 ? Math.round(avgConcurrentSum / avgConcurrentWeight) : 0;
@@ -870,19 +1008,24 @@ exports.getAggregatedSummary = async (req, res) => {
     const prevEvents = await LiveEvent.find({ owner: userId, startDateTime: { $gte: prevStart, $lt: start }, ...platformFilter }).select('_id');
     const prevIds = prevEvents.map(e => e._id);
     const prevMetrics = await LiveEventMetrics.find({ event: { $in: prevIds } });
+    const productMetricsPrev = await LiveEventProductMetrics.find({ event: { $in: prevIds } });
 
     const sumPrev = prevMetrics.reduce((acc, m) => {
       acc.durationSeconds += Number(m.durationSeconds || 0);
       acc.uniqueViewers += Number(m.uniqueViewers || 0);
       acc.views += Number(m.views || 0);
       acc.productClicks += Number(m.productClicks || 0);
-      acc.cartAdds += Number(m.cartAdds || 0);
-      acc.purchases += Number(m.purchases || 0);
       acc.revenue += Number(m.revenue || m.salesAmount || 0);
       acc.comments += Number(m.comments || 0);
       acc.newFollowers += Number(m.newFollowers || 0);
       return acc;
     }, { durationSeconds: 0, uniqueViewers: 0, views: 0, productClicks: 0, cartAdds: 0, purchases: 0, revenue: 0, comments: 0, newFollowers: 0 });
+
+    productMetricsPrev.forEach(pm => {
+      sumPrev.cartAdds += Number(pm.cartAdds || 0);
+      sumPrev.purchases += Number(pm.purchases || 0);
+      sumPrev.revenue += Number(pm.revenue || 0);
+    });
 
     function trend(curr, prev) {
       if (!prev || prev === 0) return 0;
@@ -911,6 +1054,13 @@ exports.getAggregatedSummary = async (req, res) => {
         revenue: trend(revenue, sumPrev.revenue),
         comments: trend(comments, sumPrev.comments),
         newFollowers: trend(newFollowers, sumPrev.newFollowers),
+        livesEmitted: trend(livesEmitted, prevEvents.length || 0),
+        peakViewers: trend(peakViewers, prevMetrics.reduce((max, m) => Math.max(max, Number(m.peakViewers || 0)), 0)),
+        ctr: (() => {
+          const ctrPrevBase = sumPrev.views > 0 ? sumPrev.views : sumPrev.uniqueViewers;
+          const ctrPrev = ctrPrevBase > 0 ? +(sumPrev.productClicks * 100 / ctrPrevBase).toFixed(2) : 0;
+          return trend(ctr, ctrPrev);
+        })(),
       }
     };
 
