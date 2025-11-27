@@ -110,6 +110,10 @@ io.on('connection', (socket) => {
         const room = io.sockets.adapter.rooms.get(`event_${eventId}`);
         const currentViewers = room ? room.size : 1; // incluir al espectador actual
 
+        try {
+          io.to(`event_${eventId}`).emit('chat:userCount', { eventId, count: currentViewers });
+        } catch (_) {}
+
         // --- Cálculo de duración y promedio de concurrentes ---
         // Primero, calculamos durationSeconds actual basado en la hora de inicio del evento
         let calculatedDurationSeconds;
@@ -222,6 +226,9 @@ io.on('connection', (socket) => {
     // Obtenemos la sala y el número actual de espectadores tras la desconexión
     const room = io.sockets.adapter.rooms.get(`event_${eventId}`);
     const currentViewers = room ? room.size : 0;
+    try {
+      io.to(`event_${eventId}`).emit('chat:userCount', { eventId, count: currentViewers });
+    } catch (_) {}
 
     try {
       const LiveEventMetrics = require('./models/LiveEventMetrics');

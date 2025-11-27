@@ -14,6 +14,7 @@ const Claim = require('./Claim');
 const Dispute = require('./Dispute');
 const DisputeMessage = require('./DisputeMessage');
 const DisputeReason = require('./DisputeReason');
+const ChatMessage = require('./ChatMessage');
 
 module.exports = {
   User,
@@ -32,5 +33,6 @@ module.exports = {
   , Dispute
   , DisputeMessage
   , DisputeReason
+  , ChatMessage
 };
 

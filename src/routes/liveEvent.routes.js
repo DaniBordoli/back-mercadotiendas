@@ -55,6 +55,11 @@ router.get('/:id/product-metrics', liveEventController.getProductMetrics);
 // PATCH /api/live-events/:id/metrics - Actualizar métricas del evento (sin auth para permitir tracking)
 router.patch('/:id/metrics', liveEventController.updateMetrics);
 
+// Chat del evento
+router.get('/:id/chat', liveEventController.getChatMessages);
+router.post('/:id/chat', verifyToken, liveEventController.createChatMessage);
+router.delete('/:id/chat/:messageId', verifyToken, liveEventController.deleteChatMessage);
+
 // POST /api/live-events/:id/viewers-snapshot - Registrar snapshot de espectadores (sin auth para tracking)
 router.post('/:id/viewers-snapshot', liveEventController.createViewerSnapshot);
 

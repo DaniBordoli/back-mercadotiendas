@@ -1,6 +1,7 @@
 const { validationResult } = require('express-validator');
 const mongoose = require('mongoose');
 const { LiveEvent, User, LiveEventMetrics, LiveEventProductMetrics } = require('../models');
+const { ChatMessage } = require('../models');
 const NotificationService = require('../services/notification.service');
 const { NotificationTypes } = require('../constants/notificationTypes');
 const LiveEventViewerSnapshot = require('../models/LiveEventViewerSnapshot');
@@ -297,6 +298,80 @@ exports.getHighlightedProduct = async (req, res) => {
     res.json({ success: true, highlightedProduct: event.highlightedProduct });
   } catch (error) {
     console.error('Error obteniendo producto destacado', error);
+    res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+  }
+};
+
+exports.getChatMessages = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { before, limit = 50 } = req.query;
+    const isValidObjectId = mongoose.Types.ObjectId.isValid(id);
+    const event = isValidObjectId ? await LiveEvent.findById(id).select('_id') : await LiveEvent.findOne({ slug: id }).select('_id');
+    if (!event) return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+    const query = { event: event._id, status: 'active' };
+    if (before) query.createdAt = { $lt: new Date(before) };
+    const msgs = await ChatMessage.find(query).sort({ createdAt: -1 }).limit(Math.min(Number(limit) || 50, 100)).populate('user', 'name avatar');
+    res.json({ success: true, data: msgs });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+  }
+};
+
+exports.createChatMessage = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { content } = req.body || {};
+    if (!content || String(content).trim().length === 0) return res.status(400).json({ success: false, message: 'Contenido requerido' });
+    const isValidObjectId = mongoose.Types.ObjectId.isValid(id);
+    const event = isValidObjectId ? await LiveEvent.findById(id).select('_id owner') : await LiveEvent.findOne({ slug: id }).select('_id owner');
+    if (!event) return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+    const msg = await ChatMessage.create({ event: event._id, user: req.user._id, content: String(content).slice(0, 500) });
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        const populated = await ChatMessage.findById(msg._id).populate('user', 'name avatar');
+        io.to(`event_${event._id}`).emit('chat:new', { eventId: event._id.toString(), message: populated });
+        io.to(`event_${id}`).emit('chat:new', { eventId: String(id), message: populated });
+      }
+    } catch (_) {}
+    try {
+      await LiveEventMetrics.updateOne({ event: event._id }, { $inc: { comments: 1 } }, { upsert: true });
+      const io = req.app.get('io');
+      if (io) {
+        const metricsDoc = await LiveEventMetrics.findOne({ event: event._id });
+        io.to(`event_${event._id}`).emit('metricsUpdated', { eventId: event._id.toString(), metrics: metricsDoc });
+      }
+    } catch (_) {}
+    res.json({ success: true, data: msg });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+  }
+};
+
+exports.deleteChatMessage = async (req, res) => {
+  try {
+    const { id, messageId } = req.params;
+    const isValidObjectId = mongoose.Types.ObjectId.isValid(id);
+    const event = isValidObjectId ? await LiveEvent.findById(id).select('_id owner') : await LiveEvent.findOne({ slug: id }).select('_id owner');
+    if (!event) return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+    if (String(event.owner) !== String(req.user._id)) return res.status(403).json({ success: false, message: 'No autorizado' });
+    const msg = await ChatMessage.findOne({ _id: messageId, event: event._id });
+    if (!msg) return res.status(404).json({ success: false, message: 'Mensaje no encontrado' });
+    msg.status = 'deleted';
+    msg.deletedAt = new Date();
+    msg.moderatedBy = req.user._id;
+    await msg.save();
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        const payload = { eventId: event._id.toString(), messageId, message: { _id: msg._id.toString(), user: msg.user?.toString?.() || undefined, createdAt: msg.createdAt, status: msg.status } };
+        io.to(`event_${event._id}`).emit('chat:deleted', payload);
+        io.to(`event_${id}`).emit('chat:deleted', { ...payload, eventId: String(id) });
+      }
+    } catch (_) {}
+    res.json({ success: true });
+  } catch (error) {
     res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
   }
 };
