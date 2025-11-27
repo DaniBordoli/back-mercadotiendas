@@ -34,8 +34,8 @@ const { verifyToken } = require('../middlewares/auth');
 // Inicia flujo OAuth o devuelve la URL (para peticiones XHR)
 router.get('/', verifyToken, (req, res) => {
   try {
-    // Incluir userId en el parámetro state para recuperarlo en el callback
-    const state = req.user.id;
+    const returnTo = typeof req.query.returnTo === 'string' ? req.query.returnTo : undefined;
+    const state = JSON.stringify({ userId: req.user.id, returnTo });
     const url = oauth2Client.generateAuthUrl({
       access_type: 'offline',
       prompt: 'consent',
@@ -66,16 +66,77 @@ router.get('/callback', async (req, res) => {
   try {
     const { tokens } = await oauth2Client.getToken(code);
 
-    // Guardar tokens en el usuario (se envió como state el userId)
-    const userId = req.query.state;
+    let userId = req.query.state;
+    let returnTo = null;
+    try {
+      const parsed = typeof req.query.state === 'string' ? JSON.parse(req.query.state) : null;
+      if (parsed && typeof parsed === 'object') {
+        userId = parsed.userId;
+        returnTo = parsed.returnTo;
+      }
+    } catch {}
+
     if (userId) {
       await User.updateOne({ _id: userId }, { youtubeTokens: tokens });
     }
 
-    return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/social-connection?youtube=connected`);
+    const frontendBase = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const safePath = typeof returnTo === 'string' && returnTo.startsWith('/') ? returnTo : '/social-connection?youtube=connected';
+    return res.redirect(`${frontendBase}${safePath}`);
   } catch (err) {
     console.error('[YouTubeAuth] Error intercambiando token', err.response?.data || err.message);
     return res.status(500).json({ success: false, message: 'Error intercambiando token con YouTube' });
+  }
+});
+
+/**
+ * @route POST /api/auth/youtube/chat/message
+ * @desc Publica un mensaje en el chat en vivo usando las credenciales del espectador
+ */
+router.post('/chat/message', verifyToken, async (req, res) => {
+  try {
+    const { message, broadcastId } = req.body || {};
+    if (!message || typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json({ success: false, message: 'message es requerido' });
+    }
+    if (!broadcastId) {
+      return res.status(400).json({ success: false, message: 'broadcastId es requerido' });
+    }
+
+    const user = await User.findById(req.user.id).select('youtubeTokens');
+    if (!user || !user.youtubeTokens) {
+      return res.status(401).json({ success: false, message: 'El usuario no tiene YouTube conectado' });
+    }
+
+    const { getAuthorizedClient } = require('../services/youtube.service');
+    const authClient = await getAuthorizedClient(req.user.id);
+    const youtube = google.youtube({ version: 'v3', auth: authClient });
+
+    const { data: vid } = await youtube.videos.list({
+      part: ['liveStreamingDetails'],
+      id: [String(broadcastId)],
+    });
+    const item = Array.isArray(vid.items) && vid.items.length ? vid.items[0] : null;
+    const liveChatId = item?.liveStreamingDetails?.activeLiveChatId;
+    if (!liveChatId) {
+      return res.status(400).json({ success: false, message: 'No se encontró activeLiveChatId para este broadcast' });
+    }
+
+    await youtube.liveChatMessages.insert({
+      part: ['snippet'],
+      requestBody: {
+        snippet: {
+          liveChatId,
+          type: 'textMessageEvent',
+          textMessageDetails: { messageText: message.trim() },
+        },
+      },
+    });
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[YouTubeChat] Error publicando mensaje', err.response?.data || err.message);
+    return res.status(500).json({ success: false, message: 'Error publicando mensaje en YouTube Live Chat' });
   }
 });
 

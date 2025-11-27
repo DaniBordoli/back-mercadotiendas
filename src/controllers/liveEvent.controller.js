@@ -248,6 +248,7 @@ exports.updateHighlightedProduct = async (req, res) => {
           io.to(`event_${event._id}`).emit('highlightChanged', {
             eventId: event._id,
             productId,
+            highlighted: true,
           });
         }
       } catch (emitErr) {
