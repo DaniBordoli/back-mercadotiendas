@@ -242,6 +242,18 @@ exports.updateHighlightedProduct = async (req, res) => {
       event.highlightedProduct = productId;
       await event.save({ session });
 
+      try {
+        const io = req.app.get('io');
+        if (io) {
+          io.to(`event_${event._id}`).emit('highlightChanged', {
+            eventId: event._id,
+            productId,
+          });
+        }
+      } catch (emitErr) {
+        console.warn('Error emitiendo highlightChanged', emitErr.message);
+      }
+
       // Emitir notificación y persistir historial
       try {
         const io = req.app.get('io');
@@ -407,27 +419,34 @@ exports.getPublicLiveEvents = async (req, res) => {
   }
 };
 
-// Obtener un solo evento en vivo (influencer autenticado)
 exports.getLiveEvent = async (req, res) => {
   try {
     const { id } = req.params;
 
     const isValidObjectId = mongoose.Types.ObjectId.isValid(id);
-
-    // Si es influencer autenticado, puede ver solamente sus propios eventos; de lo contrario devolver 403
-    const query = isValidObjectId ? { _id: id } : { slug: id };
-    if (req.user) {
-      // Si hay usuario autenticado, aseguramos que sea dueño del evento o influencer
-      query.owner = req.user._id;
-    }
+    const baseQuery = isValidObjectId ? { _id: id } : { slug: id };
 
     let event = await LiveEvent
-      .findOne(query)
+      .findOne(baseQuery)
       .populate('products')
       .populate({ path: 'campaign', select: '_id name kpis' });
 
     if (!event) {
-      return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+      const allowedStatuses = ['published', 'live', 'finished'];
+      event = await LiveEvent
+        .findOne({ ...baseQuery, status: { $in: allowedStatuses } })
+        .populate('products')
+        .populate({ path: 'campaign', select: '_id name kpis' });
+      if (!event) {
+        return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+      }
+    }
+
+    if (req.user && String(event.owner) !== String(req.user._id)) {
+      const allowedStatuses = ['published', 'live', 'finished'];
+      if (!allowedStatuses.includes(event.status)) {
+        return res.status(403).json({ success: false, message: 'No autorizado' });
+      }
     }
 
     // Asegurar que la primera cuenta social coincida con la plataforma principal, si esta existe

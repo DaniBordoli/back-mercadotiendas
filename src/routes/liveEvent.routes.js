@@ -43,8 +43,8 @@ router.put('/:id',
   }
 );
 
-// GET /api/live-events/:id - Obtener un evento específico (influencer autenticado)
-router.get('/:id', verifyToken, isInfluencer, liveEventController.getLiveEvent);
+// GET /api/live-events/:id - Obtener un evento específico (público con filtrado por estado)
+router.get('/:id', liveEventController.getLiveEvent);
 
 // GET /api/live-events/:id/metrics - Obtener métricas del evento (público)
 router.get('/:id/metrics', liveEventController.getMetrics);
