@@ -25,6 +25,7 @@ const NotificationTypes = {
 
   // Sistema
   SYSTEM: 'system',
+  FOLLOW: 'follow',
   CONTACT_MESSAGE: 'contact_message'
 };
 

@@ -8,7 +8,8 @@ const {
   updateProfile,
   updatePassword,
   deleteAccount,
-  updateAvatar
+  updateAvatar,
+  followUser
 } = require('../controllers/user.controller');
 
 /**
@@ -59,6 +60,11 @@ router.delete('/account',
 router.put('/avatar',
   verifyToken,
   updateAvatar
+);
+
+router.post('/:id/follow',
+  verifyToken,
+  followUser
 );
 
 module.exports = router;

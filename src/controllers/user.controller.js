@@ -2,6 +2,8 @@ const User = require('../models/User');
 const { successResponse, errorResponse } = require('../utils/response');
 const { refreshYouTubeSubscribers } = require('../services/youtube.service');
 const cloudinaryService = require('../services/cloudinary.service');
+const NotificationService = require('../services/notification.service');
+const { NotificationTypes } = require('../constants/notificationTypes');
 const multer = require('multer');
 
 // Configurar multer para manejar la carga de archivos en memoria
@@ -21,8 +23,8 @@ const upload = multer({
 const getProfile = async (req, res) => {
   try {
     // Seleccionamos los campos específicos que queremos devolver
-    const user = await User.findById(req.user.id)
-      .select('name email birthDate city province country userPhone shop avatar userType preferredAddress youtubeTokens sellerProfile influencerProfile')
+  const user = await User.findById(req.user.id)
+      .select('name email birthDate city province country userPhone shop avatar userType preferredAddress youtubeTokens sellerProfile influencerProfile followers')
       .populate('shop');
     if (!user) {
       return errorResponse(res, 'Usuario no encontrado', 404);
@@ -179,10 +181,79 @@ const deleteAccount = async (req, res) => {
   }
 };
 
+const followUser = async (req, res) => {
+  try {
+    const authUserId = req.user.id;
+    const { id: targetUserId } = req.params;
+
+    if (!targetUserId) {
+      return errorResponse(res, 'Usuario objetivo requerido', 400);
+    }
+
+    if (String(authUserId) === String(targetUserId)) {
+      return errorResponse(res, 'No puedes seguirte a ti mismo', 400);
+    }
+
+    const [authUser, targetUser] = await Promise.all([
+      User.findById(authUserId),
+      User.findById(targetUserId),
+    ]);
+
+    if (!authUser) {
+      return errorResponse(res, 'Usuario no encontrado', 404);
+    }
+    if (!targetUser) {
+      return errorResponse(res, 'Usuario objetivo no encontrado', 404);
+    }
+
+    const isFollowing = (authUser.followingUsers || []).some(u => String(u) === String(targetUserId));
+
+    if (isFollowing) {
+      authUser.followingUsers = (authUser.followingUsers || []).filter(u => String(u) !== String(targetUserId));
+      targetUser.followers = Math.max(0, Number(targetUser.followers || 0) - 1);
+    } else {
+      authUser.followingUsers = [ ...(authUser.followingUsers || []), targetUserId ];
+      targetUser.followers = Number(targetUser.followers || 0) + 1;
+    }
+
+    await Promise.all([authUser.save(), targetUser.save()]);
+
+    try {
+      if (!isFollowing) {
+        const io = req.app.get('io');
+        const followerName = authUser.name || authUser.fullName || authUser.email || 'Un usuario';
+        await NotificationService.emitAndPersist(io, {
+          users: [targetUserId],
+          type: NotificationTypes.FOLLOW,
+          title: 'Nuevo seguidor',
+          message: `${followerName} te comenzó a seguir`,
+          entity: authUser._id,
+          data: { followerId: authUser._id, followerName }
+        });
+        try {
+          if (io) {
+            io.to(`user_${targetUserId}`).emit('user:followersIncrement', { userId: targetUserId, amount: 1, followerName });
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    return successResponse(
+      res,
+      { followed: !isFollowing, followers: targetUser.followers },
+      isFollowing ? 'Dejaste de seguir al usuario' : 'Has comenzado a seguir al usuario'
+    );
+  } catch (err) {
+    console.error('Error en follow/unfollow user:', err);
+    return errorResponse(res, 'Error al procesar el seguimiento', 500, err.message);
+  }
+};
+
 module.exports = {
   getProfile,
   updateProfile,
   updatePassword,
   deleteAccount,
-  updateAvatar
+  updateAvatar,
+  followUser
 };

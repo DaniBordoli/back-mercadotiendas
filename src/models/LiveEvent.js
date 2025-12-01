@@ -23,6 +23,10 @@ const liveEventSchema = new mongoose.Schema(
       enum: ['draft', 'published', 'live', 'finished'],
       default: 'draft',
     },
+    endedAt: {
+      type: Date,
+      default: null,
+    },
   products: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Product',

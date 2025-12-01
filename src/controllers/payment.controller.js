@@ -551,26 +551,71 @@ const completeMockPayment = async (req, res) => {
       console.error('Error al emitir notificaciones en pago mock:', e);
     }
 
+    // Actualizar métricas del evento y por producto cuando el pago mock es aprobado
+    try {
+      if ((paymentInfo.status.code === '2' || paymentInfo.status.code === '200') && payment.liveEvent) {
+        const totalItems = (payment.items || []).reduce((sum, i) => sum + (i.quantity || 1), 0);
+        const totalAmount = payment.amount || (payment.items || []).reduce((sum, i) => sum + (i.quantity || 1) * (i.unitPrice || i.price || 0), 0);
+
+        await LiveEventMetrics.updateOne(
+          { event: payment.liveEvent },
+          { $inc: { purchases: 1, salesAmount: totalAmount, revenue: totalAmount } },
+          { upsert: true }
+        );
+
+        try {
+          for (const item of (payment.items || [])) {
+            const quantity = item.quantity || 1;
+            const unitPrice = item.unitPrice || item.price || 0;
+            await LiveEventProductMetrics.updateOne(
+              { event: payment.liveEvent, product: item.productId },
+              { $inc: { purchases: quantity, revenue: unitPrice * quantity } },
+              { upsert: true }
+            );
+          }
+        } catch (pmErr) {
+          console.warn('No se pudieron actualizar métricas por producto en pago mock', pmErr.message);
+        }
+
+        // Añadir actividad reciente por ventas
+        try {
+          await LiveEventMetrics.updateOne(
+            { event: payment.liveEvent },
+            {
+              $push: {
+                activityFeed: {
+                  $each: [ { type: 'sale', message: `1 venta realizada`, ts: new Date() } ],
+                  $position: 0,
+                  $slice: 50,
+                },
+              },
+            }
+          );
+        } catch (feedErr) {
+          console.warn('No se pudo actualizar activityFeed en pago mock', feedErr.message);
+        }
+
+        // Emitir actualización de métricas a la sala del evento
+        try {
+          const io = req.app.get('io');
+          if (io) {
+            const metricsDoc = await LiveEventMetrics.findOne({ event: payment.liveEvent });
+            io.to(`event_${payment.liveEvent}`).emit('metricsUpdated', { eventId: payment.liveEvent, metrics: metricsDoc });
+            const productMetrics = await LiveEventProductMetrics.find({ event: payment.liveEvent }).populate('product', 'nombre precio productImages');
+            io.to(`event_${payment.liveEvent}`).emit('productMetricsUpdated', { eventId: payment.liveEvent, metrics: productMetrics });
+          }
+        } catch (emitErr) {
+          console.warn('No se pudo emitir métricas actualizadas en pago mock', emitErr.message);
+        }
+      }
+    } catch (mErr) {
+      console.warn('Error actualizando métricas tras pago mock', mErr.message);
+    }
+
     return successResponse(res, {
       payment: payment,
       message: 'Pago mock completado exitosamente'
     }, 'Pago procesado exitosamente');
-
-    // Emitir métricas actualizadas por Socket.IO si corresponde
-    try {
-      if (payment.liveEvent) {
-        const io = req.app.get('io');
-        if (io) {
-          const productMetrics = await LiveEventProductMetrics.find({ event: payment.liveEvent }).populate('product', 'nombre precio productImages');
-          io.to(`event_${payment.liveEvent}`).emit('productMetricsUpdated', {
-            eventId: payment.liveEvent,
-            metrics: productMetrics,
-          });
-        }
-      }
-    } catch (e) {
-      console.warn('No se pudo emitir productMetricsUpdated después de pago mock', e.message);
-    }
   } catch (error) {
     console.error('Error al completar pago mock:', error);
     return errorResponse(res, 'Error al procesar el pago mock', 500, error.message);

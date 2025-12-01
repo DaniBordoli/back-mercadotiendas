@@ -114,6 +114,13 @@ io.on('connection', (socket) => {
           io.to(`event_${eventId}`).emit('chat:userCount', { eventId, count: currentViewers });
         } catch (_) {}
 
+        try {
+          const LiveEventViewerSnapshot = require('./models/LiveEventViewerSnapshot');
+          await LiveEventViewerSnapshot.create({ event: eventId, viewersCount: currentViewers, timestamp: new Date() });
+        } catch (snapErr) {
+          console.warn('No se pudo crear snapshot inicial de viewers', snapErr.message);
+        }
+
         // --- Cálculo de duración y promedio de concurrentes ---
         // Primero, calculamos durationSeconds actual basado en la hora de inicio del evento
         let calculatedDurationSeconds;
@@ -188,6 +195,13 @@ io.on('connection', (socket) => {
               );
 
               io.to(`event_${eventId}`).emit('metricsUpdated', { eventId, metrics: updated });
+
+              try {
+                const LiveEventViewerSnapshot = require('./models/LiveEventViewerSnapshot');
+                await LiveEventViewerSnapshot.create({ event: eventId, viewersCount: viewersNow, timestamp: new Date() });
+              } catch (snapErr) {
+                console.warn('No se pudo crear snapshot periódico de viewers', snapErr.message);
+              }
 
               // Si el evento terminó, limpiamos intervalo
               if (liveEvent.status === 'finished') {

@@ -71,11 +71,35 @@ exports.getInfluencerProfile = async (req, res) => {
     // Buscar perfil de influencer con datos de usuario
     const influencerProfile = await InfluencerProfile.findOne({ user: userId }).populate('user', 'name email');
 
-    if (!influencerProfile) {
-      return res.status(404).json({ msg: 'Perfil de influencer no encontrado' });
+    if (influencerProfile) {
+      return res.json(influencerProfile);
     }
 
-    res.json(influencerProfile);
+    // Fallback: si no existe documento en InfluencerProfile pero el usuario tiene rol "influencer",
+    // devolvemos un perfil sintético basado en el documento de User para no romper el frontend.
+    const userDoc = await User.findById(userId).select('name email avatar userType influencerProfile');
+    if (!userDoc) {
+      return res.status(404).json({ msg: 'Usuario no encontrado' });
+    }
+
+    if (Array.isArray(userDoc.userType) && userDoc.userType.includes('influencer')) {
+      const base = userDoc.influencerProfile || {};
+      const synthetic = {
+        _id: userDoc._id,          // El frontend usa este id para reseñas (coincide con influencerId en InfluencerReview)
+        user: userDoc._id,
+        userInfo: { name: userDoc.name, email: userDoc.email, avatar: userDoc.avatar },
+        niche: base.niche,
+        category: base.category,
+        bio: base.bio || base.biography,
+        username: base.username,
+        socialMedia: Array.isArray(base.socialMedia) ? base.socialMedia : [],
+        stats: base.stats || {},
+      };
+      return res.json({ success: true, data: synthetic });
+    }
+
+    // Si no es influencer, mantener 404 para que el frontend gestione el estado
+    return res.status(404).json({ msg: 'Perfil de influencer no encontrado' });
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Error en el servidor');

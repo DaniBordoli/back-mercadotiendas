@@ -121,7 +121,7 @@ exports.getCampaignSummary = async (req, res) => {
     const Campaign = require('../models/Campaign');
     const campaigns = await Campaign
       .find({ _id: { $in: campaignIds } })
-      .select('name milestones kpis status shop')
+      .select('name milestones kpis status shop startDate endDate')
       .populate('shop', 'name');
 
     const result = campaigns.map(c => {
@@ -150,6 +150,8 @@ exports.getCampaignSummary = async (req, res) => {
       return {
         campaignId: c._id,
         name: c.name,
+        startDate: c.startDate,
+        endDate: c.endDate,
         revenue: agg.revenue || 0,
         milestonesCompleted: completed,
         milestonesTotal: milestones.length,
@@ -418,6 +420,7 @@ exports.updateLiveEvent = async (req, res) => {
 
       // Iniciar monitoreo de YouTube cuando el evento entra en vivo
       if (status === 'live' && previousStatus !== 'live') {
+        event.endedAt = null;
         try {
           const YoutubeMonitor = require('../services/youtube.monitor');
           if (event.youtubeVideoId) {
@@ -430,6 +433,7 @@ exports.updateLiveEvent = async (req, res) => {
 
       // Detener monitoreo de YouTube y cerrar highlight cuando el evento finaliza
       if (status === 'finished' && previousStatus !== 'finished') {
+        event.endedAt = new Date();
         try {
           const YoutubeMonitor = require('../services/youtube.monitor');
           YoutubeMonitor.stop(event._id.toString());
@@ -505,14 +509,24 @@ exports.getLiveEvent = async (req, res) => {
     let event = await LiveEvent
       .findOne(baseQuery)
       .populate('products')
-      .populate({ path: 'campaign', select: '_id name kpis' });
+      .populate({ path: 'campaign', select: '_id name kpis' })
+      .populate({
+        path: 'owner',
+        select: 'name fullName avatar influencerProfile followers',
+        populate: { path: 'shop', select: 'name imageUrl followers' }
+      });
 
     if (!event) {
       const allowedStatuses = ['published', 'live', 'finished'];
       event = await LiveEvent
         .findOne({ ...baseQuery, status: { $in: allowedStatuses } })
         .populate('products')
-        .populate({ path: 'campaign', select: '_id name kpis' });
+        .populate({ path: 'campaign', select: '_id name kpis' })
+        .populate({
+          path: 'owner',
+          select: 'name fullName avatar influencerProfile followers',
+          populate: { path: 'shop', select: 'name imageUrl followers' }
+        });
       if (!event) {
         return res.status(404).json({ success: false, message: 'Evento no encontrado' });
       }
@@ -565,6 +579,50 @@ exports.getMetrics = async (req, res) => {
 
     // Preparar payload de respuesta
     const responsePayload = { metrics };
+
+    try {
+      const LiveEventViewerSnapshot = require('../models/LiveEventViewerSnapshot');
+      const eventObjectId = mongoose.Types.ObjectId(eventId);
+      const snaps = await LiveEventViewerSnapshot.aggregate([
+        { $match: { event: eventObjectId } },
+        {
+          $group: {
+            _id: null,
+            avgViewers: { $avg: '$viewersCount' },
+            maxViewers: { $max: '$viewersCount' },
+          },
+        },
+      ]);
+      const liveEventDoc = await LiveEvent.findById(eventId).select('startDateTime endedAt status updatedAt');
+      const computedAvg = snaps && snaps.length > 0 ? Math.round(Number(snaps[0].avgViewers || 0)) : 0;
+      const computedPeak = snaps && snaps.length > 0 ? Math.round(Number(snaps[0].maxViewers || 0)) : 0;
+      let computedDuration = 0;
+      if (liveEventDoc && liveEventDoc.startDateTime) {
+        const fallbackEnd = liveEventDoc.status === 'finished' ? (liveEventDoc.updatedAt || new Date()) : new Date();
+        const endTime = liveEventDoc.endedAt || fallbackEnd;
+        const diffMs = endTime.getTime() - new Date(liveEventDoc.startDateTime).getTime();
+        if (!Number.isNaN(diffMs) && diffMs >= 0) {
+          computedDuration = Math.floor(diffMs / 1000);
+        }
+      }
+      let needsSave = false;
+      if (!metrics.avgConcurrentViewers || metrics.avgConcurrentViewers === 0) {
+        metrics.avgConcurrentViewers = computedAvg;
+        needsSave = true;
+      }
+      if (!metrics.peakViewers || metrics.peakViewers === 0) {
+        metrics.peakViewers = computedPeak;
+        needsSave = true;
+      }
+      if ((!metrics.durationSeconds || metrics.durationSeconds === 0) && computedDuration > 0) {
+        metrics.durationSeconds = computedDuration;
+        needsSave = true;
+      }
+      if (needsSave) {
+        await metrics.save();
+      }
+    } catch (derErr) {
+    }
 
     // Verificar si el evento está vinculado a una campaña para incluir objetivos
     try {
@@ -679,17 +737,18 @@ exports.updateMetrics = async (req, res) => {
 
     // Incrementos acumulativos
     const incFields = {
-  uniqueViewers: Number(uniqueViewers),
-  views: Number(views),
-  productClicks: Number(productClicks),
-  cartAdds: Number(cartAdds),
-  purchases: Number(purchases),
-  directSales: Number(directSales),
-  salesAmount: Number(salesAmount),
-  likes: Number(likes),
-  shares: Number(shares),
-  comments: Number(comments),
-};
+      uniqueViewers: Number(uniqueViewers),
+      views: Number(views),
+      productClicks: Number(productClicks),
+      cartAdds: Number(cartAdds),
+      purchases: Number(purchases),
+      directSales: Number(directSales),
+      salesAmount: Number(salesAmount),
+      likes: Number(likes),
+      shares: Number(shares),
+      comments: Number(comments),
+      newFollowers: Number(newFollowers),
+    };
     // Remover claves con incremento 0 para evitar crearlas innecesariamente
     Object.keys(incFields).forEach(key => {
       if (incFields[key] && incFields[key] !== 0) {
@@ -707,24 +766,21 @@ exports.updateMetrics = async (req, res) => {
       update.$set = { ...(update.$set || {}), avgConcurrentViewers };
     }
 
-    if (newFollowers !== undefined) {
-      update.$set = { ...(update.$set || {}), newFollowers };
-    }
+    // newFollowers se maneja como incremento acumulativo
 
-    // Si durationSeconds viene explícito en el payload, lo usamos; de lo contrario, lo calculamos a partir de la hora de inicio del evento
     let finalDurationSeconds = durationSeconds;
     if (finalDurationSeconds === undefined) {
       try {
-        const liveEvent = await LiveEvent.findById(id).select('startDateTime status updatedAt');
+        const liveEvent = await LiveEvent.findById(id).select('startDateTime status endedAt updatedAt');
         if (liveEvent && liveEvent.startDateTime) {
-          const endTime = liveEvent.status === 'finished' && liveEvent.updatedAt ? liveEvent.updatedAt : new Date();
+          const fallbackEnd = liveEvent.status === 'finished' ? (liveEvent.updatedAt || new Date()) : new Date();
+          const endTime = liveEvent.endedAt || fallbackEnd;
           const diffMs = endTime.getTime() - new Date(liveEvent.startDateTime).getTime();
           if (!Number.isNaN(diffMs) && diffMs >= 0) {
             finalDurationSeconds = Math.floor(diffMs / 1000);
           }
         }
       } catch (dErr) {
-        console.warn('No se pudo calcular durationSeconds automáticamente', dErr.message);
       }
     }
 
@@ -737,6 +793,22 @@ exports.updateMetrics = async (req, res) => {
       new: true,
       upsert: true,
     });
+
+    try {
+      const incNewFollowers = Number(incFields.newFollowers || 0);
+      if (incNewFollowers > 0) {
+        const evt = await LiveEvent.findById(id).select('owner');
+        if (evt && evt.owner) {
+          await User.updateOne({ _id: evt.owner }, { $inc: { followers: incNewFollowers } });
+          try {
+            const io = req.app.get('io');
+            if (io) {
+              io.to(`user_${evt.owner.toString()}`).emit('user:followersIncrement', { userId: evt.owner.toString(), amount: incNewFollowers, eventId: id });
+            }
+          } catch (emitErr) {}
+        }
+      }
+    } catch (ufErr) {}
 
     // Si se proporciona productId, registrar también en métricas por producto
     let updatedProductMetrics = null;
@@ -787,10 +859,12 @@ exports.updateMetrics = async (req, res) => {
       purchases: { type: 'sale', label: 'venta(s) realizada(s)' },
       comments: { type: 'comment', label: 'comentario(s)' },
       newFollowers: { type: 'follower', label: 'nuevo(s) seguidor(es)' },
+      likes: { type: 'other', label: 'me gusta' },
+      shares: { type: 'other', label: 'compartido(s)' },
     };
 
     Object.entries(incFields).forEach(([key, val]) => {
-      if (val && val !== 0 && activityMap[key]) {
+      if (typeof val === 'number' && val > 0 && activityMap[key]) {
         newActivityEntries.push({
           type: activityMap[key].type,
           message: `${val} ${activityMap[key].label}`,
@@ -997,7 +1071,17 @@ exports.getViewerSeries = async (req, res) => {
 
     const LiveEventViewerSnapshot = require('../models/LiveEventViewerSnapshot');
 
-    const match = { event: id };
+    // Permitir buscar por ObjectId o slug
+    let eventId = id;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      const evt = await LiveEvent.findOne({ slug: id }).select('_id');
+      if (!evt) {
+        return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+      }
+      eventId = evt._id;
+    }
+
+    const match = { event: eventId };
     if (from) {
       match.timestamp = { ...match.timestamp, $gte: new Date(from) };
     }
@@ -1140,6 +1224,18 @@ exports.getAggregatedSummary = async (req, res) => {
       revenue,
       comments,
       newFollowers,
+      prev: {
+        durationSeconds: sumPrev.durationSeconds,
+        uniqueViewers: sumPrev.uniqueViewers,
+        productClicks: sumPrev.productClicks,
+        cartAdds: sumPrev.cartAdds,
+        purchases: sumPrev.purchases,
+        revenue: sumPrev.revenue,
+        comments: sumPrev.comments,
+        newFollowers: sumPrev.newFollowers,
+        eventsCount: prevEvents.length || 0,
+        peakViewers: prevMetrics.reduce((max, m) => Math.max(max, Number(m.peakViewers || 0)), 0),
+      },
       trends: {
         durationSeconds: trend(durationSeconds, sumPrev.durationSeconds),
         uniqueViewers: trend(uniqueViewers, sumPrev.uniqueViewers),
@@ -1213,6 +1309,8 @@ exports.getAggregatedAudienceSeries = async (req, res) => {
     const platformFilter = platform && platform !== 'all' ? { 'socialAccounts.platform': platform } : {};
     const events = await LiveEvent.find({ owner: userId, startDateTime: { $gte: start }, ...platformFilter }).select('_id startDateTime');
     const eventIds = events.map(e => e._id);
+    const metricsArr = await LiveEventMetrics.find({ event: { $in: eventIds } }).select('event uniqueViewers productClicks');
+    const eventStartMap = new Map(events.map(e => [e._id.toString(), e.startDateTime]));
 
     const match = { event: { $in: eventIds }, timestamp: { $gte: start } };
 
@@ -1229,12 +1327,19 @@ exports.getAggregatedAudienceSeries = async (req, res) => {
         { $sort: { _id: 1 } },
       ]);
 
-      const startMap = new Map(events.map(e => [e._id.toString(), e.startDateTime]));
-      const normalized = series.map(s => ({
-        timestamp: startMap.get((s._id || '').toString()) || start,
-        avgViewers: s.avgViewers || 0,
-        maxViewers: s.maxViewers || 0,
-      }));
+      const metricsMap = new Map(metricsArr.map(m => [m.event.toString(), { uv: Number(m.uniqueViewers || 0), clicks: Number(m.productClicks || 0) }]));
+      const normalized = series.map(s => {
+        const idStr = (s._id || '').toString();
+        const startTs = eventStartMap.get(idStr) || start;
+        const mm = metricsMap.get(idStr) || { uv: 0, clicks: 0 };
+        const ctr = mm.uv > 0 ? +(mm.clicks * 100 / mm.uv).toFixed(2) : 0;
+        return {
+          timestamp: startTs,
+          avgViewers: s.avgViewers || 0,
+          maxViewers: s.maxViewers || 0,
+          ctr,
+        };
+      });
       return res.json({ success: true, data: normalized });
     } else {
       const bucketSizeMs = groupBy === 'day' ? 24 * 60 * 60 * 1000 : 60 * 60 * 1000;
@@ -1257,7 +1362,26 @@ exports.getAggregatedAudienceSeries = async (req, res) => {
         { $sort: { _id: 1 } },
         { $project: { _id: 0, timestamp: "$_id", avgViewers: 1, maxViewers: 1 } },
       ]);
-      return res.json({ success: true, data: series });
+      const ctrBuckets = new Map();
+      metricsArr.forEach(m => {
+        const evId = (m.event || '').toString();
+        const sd = eventStartMap.get(evId);
+        if (!sd) return;
+        const t = new Date(sd);
+        const base = Math.floor(t.getTime() / bucketSizeMs) * bucketSizeMs;
+        const key = new Date(base).toISOString();
+        const curr = ctrBuckets.get(key) || { uv: 0, clicks: 0 };
+        curr.uv += Number(m.uniqueViewers || 0);
+        curr.clicks += Number(m.productClicks || 0);
+        ctrBuckets.set(key, curr);
+      });
+      const withCtr = series.map(s => {
+        const key = new Date(s.timestamp).toISOString();
+        const b = ctrBuckets.get(key);
+        const ctr = b && b.uv > 0 ? +((b.clicks * 100) / b.uv).toFixed(2) : 0;
+        return { ...s, ctr };
+      });
+      return res.json({ success: true, data: withCtr });
     }
   } catch (error) {
     console.error('Error agregando audiencia', error);

@@ -111,6 +111,16 @@ const userSchema = new mongoose.Schema({
     type: Object, // Puede contener username, social media, category, niches, etc.
     default: null,
   },
+  // Usuarios seguidos por el usuario autenticado
+  followingUsers: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  }],
+  // Conteo de seguidores del usuario (seguidores internos de la plataforma)
+  followers: {
+    type: Number,
+    default: 0,
+  },
   // Tiendas seguidas por el usuario
   followingShops: [{
     type: mongoose.Schema.Types.ObjectId,
