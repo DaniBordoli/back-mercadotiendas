@@ -410,65 +410,69 @@ exports.updateLiveEvent = async (req, res) => {
     if (title !== undefined) event.title = title;
     if (description !== undefined) event.description = description;
     if (date && time) {
-      event.startDateTime = new Date(`${date}T${time}:00Z`);
+      event.startDateTime = new Date(`${date}T${time}:00`);
     }
-    if (status !== undefined) event.status = status;
 
-    // Manejar cambio de estado y monitoreo de YouTube
-    if (status && status !== event.status) {
+    // Manejar cambio de estado internamente antes de asignar
+    if (status !== undefined) {
       const previousStatus = event.status;
+      const nextStatus = status;
 
-      // Iniciar monitoreo de YouTube cuando el evento entra en vivo
-      if (status === 'live' && previousStatus !== 'live') {
-        event.endedAt = null;
-        try {
-          const YoutubeMonitor = require('../services/youtube.monitor');
-          if (event.youtubeVideoId) {
-            YoutubeMonitor.start(event._id.toString(), event.youtubeVideoId);
-          }
-        } catch (err) {
-          console.error('[LiveEventController] Error iniciando YoutubeMonitor', err);
-        }
-      }
-
-      // Detener monitoreo de YouTube y cerrar highlight cuando el evento finaliza
-      if (status === 'finished' && previousStatus !== 'finished') {
-        event.endedAt = new Date();
-        try {
-          const YoutubeMonitor = require('../services/youtube.monitor');
-          YoutubeMonitor.stop(event._id.toString());
-        } catch (err) {
-          console.error('[LiveEventController] Error deteniendo YoutubeMonitor', err);
-        }
-
-        if (event.currentHighlightedProduct) {
-          const now = new Date();
-          const elapsedMs = now - (event.highlightStartedAt || now);
-          const elapsedSeconds = Math.floor(elapsedMs / 1000);
-          if (elapsedSeconds > 0) {
-            await LiveEventProductMetrics.findOneAndUpdate(
-              { event: event._id, product: event.currentHighlightedProduct },
-              { $inc: { timeHighlighted: elapsedSeconds } },
-              { upsert: true, new: true }
-            );
-          }
-          event.currentHighlightedProduct = null;
-          event.highlightStartedAt = null;
-
-          // Emitir highlightChanged con null
+      if (nextStatus !== previousStatus) {
+        
+        if (nextStatus === 'live' && previousStatus !== 'live') {
+          event.endedAt = null;
+          event.startDateTime = new Date();
           try {
-            const io = req.app.get('io');
-            if (io) {
-              io.to(`event_${event._id}`).emit('highlightChanged', {
-                eventId: event._id,
-                productId: null,
-              });
+            const YoutubeMonitor = require('../services/youtube.monitor');
+            if (event.youtubeVideoId) {
+              YoutubeMonitor.start(event._id.toString(), event.youtubeVideoId);
             }
-          } catch (e) {
-            console.warn('No se pudo emitir highlightChanged al finalizar live', e.message);
+          } catch (err) {
+            console.error('[LiveEventController] Error iniciando YoutubeMonitor', err);
+          }
+        }
+
+        
+        if (nextStatus === 'finished' && previousStatus !== 'finished') {
+          event.endedAt = new Date();
+          try {
+            const YoutubeMonitor = require('../services/youtube.monitor');
+            YoutubeMonitor.stop(event._id.toString());
+          } catch (err) {
+            console.error('[LiveEventController] Error deteniendo YoutubeMonitor', err);
+          }
+
+          if (event.currentHighlightedProduct) {
+            const now = new Date();
+            const elapsedMs = now - (event.highlightStartedAt || now);
+            const elapsedSeconds = Math.floor(elapsedMs / 1000);
+            if (elapsedSeconds > 0) {
+              await LiveEventProductMetrics.findOneAndUpdate(
+                { event: event._id, product: event.currentHighlightedProduct },
+                { $inc: { timeHighlighted: elapsedSeconds } },
+                { upsert: true, new: true }
+              );
+            }
+            event.currentHighlightedProduct = null;
+            event.highlightStartedAt = null;
+
+            try {
+              const io = req.app.get('io');
+              if (io) {
+                io.to(`event_${event._id}`).emit('highlightChanged', {
+                  eventId: event._id,
+                  productId: null,
+                });
+              }
+            } catch (e) {
+              console.warn('No se pudo emitir highlightChanged al finalizar live', e.message);
+            }
           }
         }
       }
+
+      event.status = nextStatus;
     }
     if (products !== undefined) event.products = products;
     if (socialAccounts !== undefined) event.socialAccounts = socialAccounts;
