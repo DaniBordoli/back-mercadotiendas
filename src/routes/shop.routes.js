@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { createShop, getShop, updateShop, deleteShop, updateShopTemplate, getShopTemplate, getMyShop, updateShopLogo, getPublicShop, updateMobbexCredentials, checkShopNameAvailability, followShop } = require('../controllers/shop.controller');
+const { createShop, getShop, updateShop, deleteShop, updateShopTemplate, getShopTemplate, getMyShop, updateShopLogo, updateShopBanner, getPublicShop, updateMobbexCredentials, checkShopNameAvailability, followShop } = require('../controllers/shop.controller');
 const { verifyToken } = require('../middlewares/auth');
 
 // Ruta pública para obtener tienda por ID (sin autenticación)
@@ -19,8 +19,9 @@ router.put('/template', updateShopTemplate);
 
 router.get('/template', getShopTemplate);
 
-// Subir logo de la tienda
 router.put('/logo', updateShopLogo);
+router.put('/logo', updateShopLogo);
+router.put('/banner', updateShopBanner);
 
 // Crear tienda
 router.post('/', createShop);

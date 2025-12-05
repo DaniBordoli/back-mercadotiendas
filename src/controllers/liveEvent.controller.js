@@ -21,8 +21,20 @@ exports.createLiveEvent = async (req, res) => {
     // In createLiveEvent, after destructuring req.body
     const { title, description, date, time, status, products = [], socialAccounts = [], youtubeVideoId, campaign } = req.body;
 
-    // Combinar fecha y hora en un solo Date ISO
-    const startDateTime = new Date(`${date}T${time}:00Z`);
+    let startDateTime;
+    try {
+      const tzOffsetMinutes = Number(req.body.tzOffsetMinutes ?? NaN);
+      if (!Number.isNaN(tzOffsetMinutes)) {
+        const [y, m, d] = String(date).split('-').map((v) => parseInt(v));
+        const [hh, mm] = String(time).split(':').map((v) => parseInt(v));
+        const utcMs = Date.UTC(y, m - 1, d, hh, mm, 0);
+        startDateTime = new Date(utcMs + tzOffsetMinutes * 60000);
+      } else {
+        startDateTime = new Date(`${date}T${time}:00`);
+      }
+    } catch (_) {
+      startDateTime = new Date(`${date}T${time}:00`);
+    }
 
     // Validar que la fecha no esté en el pasado
     if (startDateTime < new Date()) {

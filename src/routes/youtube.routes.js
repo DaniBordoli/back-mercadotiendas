@@ -2,6 +2,7 @@ const router = require('express').Router();
 const { google } = require('googleapis');
 const axios = require('axios');
 const User = require('../models/User');
+const gatewaySessions = new Map();
 
 // Credentials from env
 const CLIENT_ID = process.env.YT_CLIENT_ID;
@@ -301,6 +302,162 @@ router.get('/live/stats', verifyToken, async (req, res) => {
   } catch (err) {
     console.error('[YouTubeAuth] Error obteniendo estadísticas live', err.response?.data || err.message);
     return res.status(500).json({ success: false, message: 'Error obteniendo estadísticas de YouTube Live' });
+  }
+});
+
+router.post('/live/setup', verifyToken, async (req, res) => {
+  try {
+    const { title, description, privacy = 'unlisted', scheduledStartTime } = req.body || {};
+    const { getAuthorizedClient } = require('../services/youtube.service');
+    const authClient = await getAuthorizedClient(req.user.id);
+    const yt = google.youtube({ version: 'v3', auth: authClient });
+
+    const { data: streamData } = await yt.liveStreams.insert({
+      part: ['snippet', 'cdn', 'contentDetails'],
+      requestBody: {
+        snippet: { title: title || 'MercadoTiendas Live' },
+        cdn: { ingestionType: 'rtmp' },
+        contentDetails: {},
+      },
+    });
+
+    const stream = Array.isArray(streamData.items) && streamData.items.length ? streamData.items[0] : null;
+    if (!stream) return res.status(500).json({ success: false, message: 'No se pudo crear el liveStream' });
+
+    const { data: broadcastData } = await yt.liveBroadcasts.insert({
+      part: ['snippet', 'status', 'contentDetails'],
+      requestBody: {
+        snippet: {
+          title: title || 'MercadoTiendas Live',
+          description: description || '',
+          scheduledStartTime: scheduledStartTime || new Date().toISOString(),
+        },
+        status: { privacyStatus: String(privacy || 'unlisted') },
+        contentDetails: { monitorStream: { enableMonitorStream: false }, enableAutoStart: true, enableAutoStop: true },
+      },
+    });
+
+    const broadcast = Array.isArray(broadcastData.items) && broadcastData.items.length ? broadcastData.items[0] : null;
+    if (!broadcast) return res.status(500).json({ success: false, message: 'No se pudo crear el liveBroadcast' });
+
+    await yt.liveBroadcasts.bind({
+      id: String(broadcast.id),
+      part: ['id'],
+      streamId: String(stream.id),
+    });
+
+    const ingestionAddress = stream.cdn?.ingestionInfo?.ingestionAddress || null;
+    const streamName = stream.cdn?.ingestionInfo?.streamName || null;
+    const response = {
+      broadcastId: broadcast.id,
+      streamId: stream.id,
+      ingestionAddress,
+      streamKey: streamName,
+      title: broadcast.snippet?.title,
+    };
+    return res.json({ success: true, setup: response });
+  } catch (err) {
+    console.error('[YouTubeAuth] Error creando live', err.response?.data || err.message);
+    return res.status(500).json({ success: false, message: 'Error creando live de YouTube' });
+  }
+});
+
+router.post('/live/start', verifyToken, async (req, res) => {
+  try {
+    const { broadcastId } = req.body || {};
+    if (!broadcastId) return res.status(400).json({ success: false, message: 'broadcastId es requerido' });
+    const { getAuthorizedClient } = require('../services/youtube.service');
+    const authClient = await getAuthorizedClient(req.user.id);
+    const yt = google.youtube({ version: 'v3', auth: authClient });
+    const { data: bData } = await yt.liveBroadcasts.list({ part: ['status','contentDetails'], id: [String(broadcastId)] });
+    if (!bData.items || !bData.items.length) {
+      return res.status(404).json({ success: false, message: 'No se encontró el broadcast' });
+    }
+    const b = bData.items[0];
+    const streamId = b.contentDetails?.boundStreamId;
+    if (!streamId) {
+      return res.status(400).json({ success: false, message: 'El broadcast no tiene un stream vinculado' });
+    }
+    const { data: sData } = await yt.liveStreams.list({ part: ['status','cdn'], id: [String(streamId)] });
+    const s = sData.items && sData.items.length ? sData.items[0] : null;
+    const streamStatus = s?.status?.streamStatus; // expected: 'active' when encoder is pushing RTMP
+    if (streamStatus !== 'active') {
+      return res.status(400).json({ success: false, message: 'El stream RTMP no está activo. Inicia tu encoder y vuelve a intentar.' });
+    }
+    try {
+      await yt.liveBroadcasts.transition({ id: String(broadcastId), part: ['status'], broadcastStatus: 'testing' });
+    } catch (e) {}
+    try {
+      await yt.liveBroadcasts.transition({ id: String(broadcastId), part: ['status'], broadcastStatus: 'live' });
+      return res.json({ success: true });
+    } catch (err) {
+      const msg = err?.response?.data?.error?.message || 'Error iniciando live de YouTube';
+      return res.status(500).json({ success: false, message: msg });
+    }
+  } catch (err) {
+    console.error('[YouTubeAuth] Error iniciando live', err.response?.data || err.message);
+    return res.status(500).json({ success: false, message: 'Error iniciando live de YouTube' });
+  }
+});
+
+router.post('/live/stop', verifyToken, async (req, res) => {
+  try {
+    const { broadcastId } = req.body || {};
+    if (!broadcastId) return res.status(400).json({ success: false, message: 'broadcastId es requerido' });
+    const { getAuthorizedClient } = require('../services/youtube.service');
+    const authClient = await getAuthorizedClient(req.user.id);
+    const yt = google.youtube({ version: 'v3', auth: authClient });
+    await yt.liveBroadcasts.transition({ id: String(broadcastId), part: ['status'], broadcastStatus: 'complete' });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[YouTubeAuth] Error finalizando live', err.response?.data || err.message);
+    return res.status(500).json({ success: false, message: 'Error finalizando live de YouTube' });
+  }
+});
+
+router.post('/gateway/start', verifyToken, async (req, res) => {
+  try {
+    const { broadcastId } = req.body || {};
+    if (!broadcastId) return res.status(400).json({ success: false, message: 'broadcastId es requerido' });
+    const gatewayBase = process.env.YT_GATEWAY_URL;
+    if (!gatewayBase) return res.status(500).json({ success: false, message: 'YT_GATEWAY_URL no configurado en el backend' });
+    const { getAuthorizedClient } = require('../services/youtube.service');
+    const authClient = await getAuthorizedClient(req.user.id);
+    const yt = google.youtube({ version: 'v3', auth: authClient });
+    const { data: bData } = await yt.liveBroadcasts.list({ part: ['contentDetails'], id: [String(broadcastId)] });
+    if (!bData.items || !bData.items.length) return res.status(404).json({ success: false, message: 'Broadcast no encontrado' });
+    const streamId = bData.items[0].contentDetails?.boundStreamId;
+    if (!streamId) return res.status(400).json({ success: false, message: 'Broadcast sin stream vinculado' });
+    const { data: sData } = await yt.liveStreams.list({ part: ['cdn'], id: [String(streamId)] });
+    if (!sData.items || !sData.items.length) return res.status(404).json({ success: false, message: 'Stream no encontrado' });
+    const s = sData.items[0];
+    const address = s.cdn?.ingestionInfo?.ingestionAddress;
+    const key = s.cdn?.ingestionInfo?.streamName;
+    if (!address || !key) return res.status(400).json({ success: false, message: 'Faltan datos de ingestión' });
+    const rtmpUrl = `${address}/${key}`;
+    const { data } = await axios.post(`${gatewayBase}/start`, { rtmpUrl });
+    const sessionId = data?.sessionId || data?.id || null;
+    if (sessionId) gatewaySessions.set(String(broadcastId), sessionId);
+    return res.json({ success: true, sessionId });
+  } catch (err) {
+    console.error('[YouTubeGateway] Error iniciando pasarela', err.response?.data || err.message);
+    return res.status(500).json({ success: false, message: 'Error iniciando pasarela' });
+  }
+});
+
+router.post('/gateway/stop', verifyToken, async (req, res) => {
+  try {
+    const { broadcastId, sessionId: sid } = req.body || {};
+    const gatewayBase = process.env.YT_GATEWAY_URL;
+    if (!gatewayBase) return res.status(500).json({ success: false, message: 'YT_GATEWAY_URL no configurado en el backend' });
+    const sessionId = sid || gatewaySessions.get(String(broadcastId));
+    if (!sessionId) return res.status(400).json({ success: false, message: 'sessionId faltante' });
+    await axios.post(`${gatewayBase}/stop`, { sessionId });
+    if (broadcastId) gatewaySessions.delete(String(broadcastId));
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[YouTubeGateway] Error deteniendo pasarela', err.response?.data || err.message);
+    return res.status(500).json({ success: false, message: 'Error deteniendo pasarela' });
   }
 });
 

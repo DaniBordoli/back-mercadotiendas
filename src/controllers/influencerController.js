@@ -258,9 +258,8 @@ exports.listInfluencers = async (req, res) => {
     */
 
     const users = await User.find({
-      userType: { $in: ['influencer'] },
-      influencerProfile: { $ne: null }
-    }).select('name fullName avatar influencerProfile');
+      userType: { $in: ['influencer'] }
+    }).select('name fullName avatar influencerProfile youtubeTokens');
 
     // Mapeamos la respuesta para mantener la misma forma que el frontend espera
     const influencers = users.map((u) => {
@@ -290,7 +289,7 @@ exports.listInfluencers = async (req, res) => {
           tiktok: profile.tiktok,
           youtube: profile.youtube,
           stats: profile.stats,
-          engagementRate: profile.stats?.rating || 0
+          engagementRate: (profile.stats?.engagementRate ?? profile.engagementRate ?? 0)
         }
       };
     });

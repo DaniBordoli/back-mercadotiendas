@@ -283,6 +283,38 @@ exports.updateShop = async (req, res) => {
     const updates = req.body;
     const userId = req.user.id;
 
+    if (typeof updates.categories === 'string') {
+      try {
+        updates.categories = JSON.parse(updates.categories);
+      } catch (e) {
+        updates.categories = [];
+      }
+    }
+    if (Array.isArray(updates.categories)) {
+      updates.categories = updates.categories.map((c) => {
+        if (typeof c === 'object' && c !== null) {
+          return c.id || c._id || c;
+        }
+        return c;
+      });
+    }
+
+    if (typeof updates.subcategories === 'string') {
+      try {
+        updates.subcategories = JSON.parse(updates.subcategories);
+      } catch (e) {
+        updates.subcategories = [];
+      }
+    }
+    if (Array.isArray(updates.subcategories)) {
+      updates.subcategories = updates.subcategories.map((s) => {
+        if (typeof s === 'object' && s !== null) {
+          return s.id || s._id || s;
+        }
+        return s;
+      });
+    }
+
     const shop = await Shop.findById(id);
     if (!shop) {
       return errorResponse(res, 'Tienda no encontrada', 404);
@@ -546,6 +578,54 @@ exports.updateShopLogo = async (req, res) => {
     } catch (err) {
       console.error('Error al actualizar logo:', err);
       return errorResponse(res, 'Error interno al actualizar logo', 500);
+    }
+  });
+};
+
+exports.updateShopBanner = async (req, res) => {
+  upload(req, res, async (err) => {
+    if (err instanceof multer.MulterError) {
+      return errorResponse(res, 'Error al subir el archivo: ' + err.message, 400);
+    } else if (err) {
+      return errorResponse(res, 'Error al procesar el archivo: ' + err.message, 400);
+    }
+
+    try {
+      const userId = req.user.id;
+
+      if (!req.file) {
+        return errorResponse(res, 'No se encontró archivo de imagen', 400);
+      }
+
+      const user = await User.findById(userId).populate('shop');
+      if (!user || !user.shop) {
+        return errorResponse(res, 'Tienda no encontrada', 404);
+      }
+
+      const shop = user.shop;
+
+      try {
+        const uploadResult = await cloudinaryService.uploadImage(req.file.buffer, 'shop-banners');
+
+        if (!shop.templateUpdate || typeof shop.templateUpdate !== 'object') {
+          shop.templateUpdate = {};
+        }
+        shop.templateUpdate.placeholderHeroImage = uploadResult;
+        await shop.save();
+
+        return successResponse(res, {
+          message: 'Banner actualizado exitosamente',
+          bannerUrl: uploadResult
+        });
+
+      } catch (uploadError) {
+        console.error('Error al subir imagen a Cloudinary:', uploadError);
+        return errorResponse(res, 'Error al procesar la imagen', 500);
+      }
+
+    } catch (err) {
+      console.error('Error al actualizar banner:', err);
+      return errorResponse(res, 'Error interno al actualizar banner', 500);
     }
   });
 };
