@@ -119,6 +119,28 @@ exports.createProduct = (req, res) => {
         return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
       }
 
+      const hasVariants = (tieneVariantes === 'true' || tieneVariantes === true);
+
+      // Sanitizar combinaciones (tipos numéricos y flags)
+      if (Array.isArray(combinacionesVariantes)) {
+        combinacionesVariantes = combinacionesVariantes.map((c) => {
+          const priceNum = Number(c.price);
+          const stockNum = Number(c.stock);
+          return {
+            id: c.id,
+            combination: c.combination,
+            sku: c.sku || '',
+            price: Number.isFinite(priceNum) && priceNum > 0 ? priceNum : 0,
+            stock: Number.isFinite(stockNum) && stockNum >= 0 ? stockNum : 0,
+            image: c.image,
+            isAccepted: !!c.isAccepted,
+          };
+        });
+      }
+
+      const parsedStock = Number(stock);
+      const safeStock = hasVariants ? undefined : (Number.isFinite(parsedStock) ? parsedStock : 0);
+
       const product = new Product({
         nombre,
         descripcion,
@@ -131,14 +153,14 @@ exports.createProduct = (req, res) => {
         subcategoria,
         productImages,
         variantes,
-        tieneVariantes: tieneVariantes === 'true' || tieneVariantes === true,
+        tieneVariantes: hasVariants,
         combinacionesVariantes,
         largoCm: numLargo,
         anchoCm: numAncho,
         altoCm: numAlto,
         pesoKg: numPeso,
         customAttributes: parsedCustomAttributes,
-        stock: Number(stock), // Convertir stock a Number
+        stock: safeStock,
         codigoBarras: codigoBarras || '', // Agregar código de barras
         shop: user.shop 
       });

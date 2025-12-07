@@ -105,13 +105,17 @@ const productSchema = new mongoose.Schema({
       trim: true
     },
     price: {
-      type: String
+      type: Number
     },
     stock: {
-      type: String
+      type: Number
     },
     image: {
       type: String
+    },
+    isAccepted: {
+      type: Boolean,
+      default: false
     }
   }],
   codigoBarras: {
