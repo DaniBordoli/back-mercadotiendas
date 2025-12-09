@@ -716,6 +716,8 @@ exports.getProductMetrics = async (req, res) => {
   }
 };
 
+const uniqueViewerRegistry = new Map();
+
 exports.updateMetrics = async (req, res) => {
   try {
     const { id } = req.params;
@@ -746,14 +748,22 @@ exports.updateMetrics = async (req, res) => {
       comments = 0,
       newFollowers,
       productId,
+      viewerId,
     } = req.body;
 
     // Construir objeto de actualización dinámicamente
     const update = {};
 
     // Incrementos acumulativos
+    let uniqueInc = Number(uniqueViewers);
+    if (uniqueInc > 0 && typeof viewerId === 'string' && viewerId) {
+      const key = String(eventId);
+      let set = uniqueViewerRegistry.get(key);
+      if (!set) { set = new Set(); uniqueViewerRegistry.set(key, set); }
+      if (set.has(viewerId)) { uniqueInc = 0; } else { set.add(viewerId); }
+    }
     const incFields = {
-      uniqueViewers: Number(uniqueViewers),
+      uniqueViewers: uniqueInc,
       views: Number(views),
       productClicks: Number(productClicks),
       cartAdds: Number(cartAdds),

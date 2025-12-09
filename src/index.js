@@ -94,31 +94,52 @@ io.on('connection', (socket) => {
   console.log('Cliente Socket.IO conectado:', socket.id);
 
   // Permite que el cliente se una a una sala específica del evento si envía eventId
-  socket.on('joinEventRoom', async (eventId) => {
+  socket.on('joinEventRoom', async (payload) => {
+    const eventId = typeof payload === 'string' ? payload : payload?.eventId;
     if (eventId) {
       socket.join(`event_${eventId}`);
-      // Guardamos en la instancia del socket qué evento sigue este cliente
       socket.data = socket.data || {};
       socket.data.joinedEventId = eventId;
+      if (payload && typeof payload === 'object') {
+        if (payload.role) socket.data.role = payload.role;
+        if (payload.viewerId) socket.data.viewerId = payload.viewerId;
+      }
 
       try {
         // Cargar modelos de manera perezosa para evitar dependencias circulares
         const LiveEventMetrics = require('./models/LiveEventMetrics');
         const LiveEvent = require('./models/LiveEvent');
 
-        // Obtener tamaño actual de la sala (número de espectadores concurrentes)
         const room = io.sockets.adapter.rooms.get(`event_${eventId}`);
-        const currentViewers = room ? room.size : 1; // incluir al espectador actual
+        let currentViewers = 0;
+        if (room) {
+          for (const id of room) {
+            const s = io.sockets.sockets.get(id);
+            if (!s || s.data?.joinedEventId !== eventId) continue;
+            if (!s.data?.role || s.data.role === 'viewer') currentViewers++;
+          }
+        }
 
         try {
           io.to(`event_${eventId}`).emit('chat:userCount', { eventId, count: currentViewers });
         } catch (_) {}
 
+        let isLive = false;
         try {
-          const LiveEventViewerSnapshot = require('./models/LiveEventViewerSnapshot');
-          await LiveEventViewerSnapshot.create({ event: eventId, viewersCount: currentViewers, timestamp: new Date() });
-        } catch (snapErr) {
-          console.warn('No se pudo crear snapshot inicial de viewers', snapErr.message);
+          const liveEvent = await LiveEvent.findById(eventId).select('startDateTime status updatedAt');
+          if (liveEvent) {
+            isLive = String(liveEvent.status) === 'live';
+          }
+        } catch {}
+        if (isLive) {
+          try {
+            const LiveEventViewerSnapshot = require('./models/LiveEventViewerSnapshot');
+            const ts = new Date();
+            await LiveEventViewerSnapshot.create({ event: eventId, viewersCount: currentViewers, timestamp: ts });
+            try {
+              io.to(`event_${eventId}`).emit('viewerCountUpdated', { eventId, viewersCount: currentViewers, timestamp: ts });
+            } catch {}
+          } catch (snapErr) {}
         }
 
         // --- Cálculo de duración y promedio de concurrentes ---
@@ -144,7 +165,6 @@ io.on('connection', (socket) => {
         // Calcular nuevo promedio ponderado de espectadores concurrentes
         let newAvgConcurrent = prevAvg;
         if (durationForAvg > 0) {
-          // Formula: (prevAvg * prevDuration + currentViewers) / (prevDuration + 1)
           newAvgConcurrent = ((prevAvg * prevDuration) + currentViewers) / (prevDuration + 1);
         } else {
           newAvgConcurrent = currentViewers;
@@ -152,13 +172,12 @@ io.on('connection', (socket) => {
 
         // Construir objeto de actualización
         const update = {
-          $inc: { uniqueViewers: 1 },
           $max: { peakViewers: currentViewers },
           $set: {
-             avgConcurrentViewers: Math.round(newAvgConcurrent),
-             ...(durationForAvg !== undefined ? { durationSeconds: durationForAvg } : {})
-           }
-         };
+            avgConcurrentViewers: Math.round(newAvgConcurrent),
+            ...(durationForAvg !== undefined ? { durationSeconds: durationForAvg } : {})
+          }
+        };
 
         // Actualizar o crear métricas automáticamente
         const metrics = await LiveEventMetrics.findOneAndUpdate(
@@ -175,7 +194,14 @@ io.on('connection', (socket) => {
           const intervalId = setInterval(async () => {
             try {
               const roomNow = io.sockets.adapter.rooms.get(`event_${eventId}`);
-              const viewersNow = roomNow ? roomNow.size : 0;
+              let viewersNow = 0;
+              if (roomNow) {
+                for (const id of roomNow) {
+                  const s = io.sockets.sockets.get(id);
+                  if (!s || s.data?.joinedEventId !== eventId) continue;
+                  if (!s.data?.role || s.data.role === 'viewer') viewersNow++;
+                }
+              }
               const liveEvent = await LiveEvent.findById(eventId).select('startDateTime status updatedAt');
               if (!liveEvent || !liveEvent.startDateTime) return;
 
@@ -196,11 +222,13 @@ io.on('connection', (socket) => {
 
               io.to(`event_${eventId}`).emit('metricsUpdated', { eventId, metrics: updated });
 
-              try {
-                const LiveEventViewerSnapshot = require('./models/LiveEventViewerSnapshot');
-                await LiveEventViewerSnapshot.create({ event: eventId, viewersCount: viewersNow, timestamp: new Date() });
-              } catch (snapErr) {
-                console.warn('No se pudo crear snapshot periódico de viewers', snapErr.message);
+              if (String(liveEvent.status) === 'live') {
+                try {
+                  const LiveEventViewerSnapshot = require('./models/LiveEventViewerSnapshot');
+                  const ts2 = new Date();
+                  await LiveEventViewerSnapshot.create({ event: eventId, viewersCount: viewersNow, timestamp: ts2 });
+                  try { io.to(`event_${eventId}`).emit('viewerCountUpdated', { eventId, viewersCount: viewersNow, timestamp: ts2 }); } catch {}
+                } catch {}
               }
 
               // Si el evento terminó, limpiamos intervalo
