@@ -29,6 +29,8 @@ const claimsRoutes = require('./claims.routes');
 const disputeRoutes = require('./dispute.routes');
 const contactMessageRoutes = require('./contactMessage.routes');
 const favoritesRoutes = require('./favorites.routes');
+const auditRoutes = require('./audit.routes');
+const adminRoutes = require('./admin.routes');
 
 // Rutas de autenticación (/api/auth/*)
 router.use('/auth', authRoutes);
@@ -104,6 +106,8 @@ router.use('/claims', claimsRoutes);
 router.use('/disputes', disputeRoutes);
 router.use('/contact-messages', contactMessageRoutes);
 router.use('/favorites', favoritesRoutes);
+router.use('/audit', auditRoutes);
+router.use('/admin', adminRoutes);
 
 // Rutas de influencer (/api/users/* y /api/admin/influencer/*)
 router.use('/', influencerRoutes);

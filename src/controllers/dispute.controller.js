@@ -9,6 +9,7 @@ const cloudinaryService = require('../services/cloudinary.service');
 const { successResponse, errorResponse } = require('../utils/responseHelper');
 const NotificationService = require('../services/notification.service');
 const { NotificationTypes } = require('../constants/notificationTypes');
+const AuditLog = require('../models/AuditLog');
 
 exports.getReasons = async (req, res) => {
   try {
@@ -306,5 +307,121 @@ exports.proposal = async (req, res) => {
     return successResponse(res, { dispute });
   } catch (err) {
     return errorResponse(res, 'Error proponiendo resolución');
+  }
+};
+
+exports.listAdminDisputes = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit || '20'), 10)));
+    const { context, estado, reference, buyerEmail, sellerEmail } = req.query || {};
+
+    const filter = {};
+    if (context) filter.context = context;
+    if (estado) filter.estado = estado;
+    if (reference) filter.reference = reference;
+
+    let buyerIds = null;
+    let sellerIds = null;
+    try {
+      if (buyerEmail && typeof buyerEmail === 'string' && buyerEmail.trim() !== '') {
+        const users = await require('../models/User').find({ email: new RegExp(`^${buyerEmail}`, 'i') }).select('_id');
+        buyerIds = users.map(u => u._id);
+      }
+      if (sellerEmail && typeof sellerEmail === 'string' && sellerEmail.trim() !== '') {
+        const users = await require('../models/User').find({ email: new RegExp(`^${sellerEmail}`, 'i') }).select('_id');
+        sellerIds = users.map(u => u._id);
+      }
+    } catch (_) {}
+
+    if (buyerIds && buyerIds.length > 0) filter.buyerId = { $in: buyerIds };
+    if (sellerIds && sellerIds.length > 0) filter.sellerId = { $in: sellerIds };
+
+    const total = await Dispute.countDocuments(filter);
+    const disputes = await Dispute.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+
+    const userIds = [];
+    disputes.forEach(d => {
+      if (d.buyerId) userIds.push(d.buyerId);
+      if (d.sellerId) userIds.push(d.sellerId);
+    });
+    let usersMap = new Map();
+    if (userIds.length > 0) {
+      try {
+        const users = await require('../models/User').find({ _id: { $in: userIds } }).select('_id name fullName email avatar').lean();
+        usersMap = new Map(users.map(u => [String(u._id), u]));
+      } catch (_) {}
+    }
+
+    const payload = disputes.map(d => {
+      const dto = { ...d };
+      const buyer = d.buyerId ? usersMap.get(String(d.buyerId)) : null;
+      const seller = d.sellerId ? usersMap.get(String(d.sellerId)) : null;
+      dto.buyerDisplay = buyer ? { _id: buyer._id, name: buyer.name || buyer.fullName || buyer.email, email: buyer.email, avatar: buyer.avatar || null } : null;
+      dto.sellerDisplay = seller ? { _id: seller._id, name: seller.name || seller.fullName || seller.email, email: seller.email, avatar: seller.avatar || null } : null;
+      return dto;
+    });
+
+    return successResponse(res, { total, page, limit, disputes: payload }, 'Listado de disputas');
+  } catch (err) {
+    return errorResponse(res, 'Error listando disputas');
+  }
+};
+
+exports.updateDisputeStateAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { estado, cierreTipo, comentario } = req.body || {};
+    const allowed = ['open','in_review','awaiting_party_a','awaiting_party_b','proposal','resolved','closed_expired','rejected','escalated'];
+    if (!allowed.includes(String(estado))) {
+      return errorResponse(res, 'Estado inválido', 400);
+    }
+
+    const dispute = await Dispute.findById(id);
+    if (!dispute) return errorResponse(res, 'Disputa no encontrada', 404);
+
+    const before = { estado: dispute.estado, cierreTipo: dispute.cierreTipo };
+    dispute.estado = estado;
+    if (cierreTipo !== undefined) dispute.cierreTipo = cierreTipo;
+    if (estado === 'awaiting_party_a' || estado === 'awaiting_party_b' || estado === 'proposal' || estado === 'in_review') {
+      dispute.vencimientoActual = new Date(Date.now() + (dispute.slaHoras || 72) * 3600 * 1000);
+    }
+    if (estado === 'resolved' || estado === 'rejected' || estado === 'closed_expired') {
+      dispute.vencimientoActual = null;
+    }
+    await dispute.save();
+
+    try {
+      await AuditLog.create({
+        actor: req.user.id,
+        action: 'dispute.estado.update',
+        entityType: 'Dispute',
+        entityId: dispute._id,
+        before,
+        after: { estado: dispute.estado, cierreTipo: dispute.cierreTipo },
+        metadata: { ip: req.ip }
+      });
+    } catch (_) {}
+
+    try {
+      const io = req.app.get('io');
+      const msgText = comentario || `Estado actualizado a "${estado}"`;
+      await DisputeMessage.create({ disputeId: dispute._id, autorRol: 'moderator', texto: msgText });
+      const payload = { disputeId: dispute._id, dispute };
+      if (io) {
+        if (dispute.buyerId) io.to(String(dispute.buyerId)).emit('dispute:updated', payload);
+        if (dispute.sellerId) io.to(String(dispute.sellerId)).emit('dispute:updated', payload);
+      }
+      await NotificationService.emitAndPersist(io, { users: dispute.buyerId, type: NotificationTypes.DISPUTE, title: 'Actualización de disputa', message: msgText, entity: dispute._id, data: { role: 'buyer', estado: dispute.estado } });
+      await NotificationService.emitAndPersist(io, { users: dispute.sellerId, type: NotificationTypes.DISPUTE, title: 'Actualización de disputa', message: msgText, entity: dispute._id, data: { role: 'seller', estado: dispute.estado } });
+    } catch (_) {}
+
+    return successResponse(res, { dispute }, 'Estado de disputa actualizado');
+  } catch (err) {
+    return errorResponse(res, 'Error actualizando disputa');
   }
 };

@@ -3,6 +3,7 @@ const User = require('../models/User');
 const { successResponse, errorResponse } = require('../utils/response');
 const cloudinaryService = require('../services/cloudinary.service');
 const multer = require('multer');
+const AuditLog = require('../models/AuditLog');
 
 // Configurar multer para manejar la carga de archivos en memoria
 const upload = multer({
@@ -674,7 +675,7 @@ exports.getShopTemplate = async (req, res) => {
 exports.updateMobbexCredentials = async (req, res) => {
   try {
     const { id } = req.params;
-    const { mobbexApiKey, mobbexAccessToken } = req.body;
+    const { mobbexApiKey, mobbexAccessToken, mobbexTaxId } = req.body;
 
     if (!mobbexApiKey || !mobbexAccessToken) {
       return errorResponse(res, 'Faltan credenciales de Mobbex', 400);
@@ -692,6 +693,9 @@ exports.updateMobbexCredentials = async (req, res) => {
 
     shop.mobbexApiKey = mobbexApiKey;
     shop.mobbexAccessToken = mobbexAccessToken;
+    if (typeof mobbexTaxId === 'string') {
+      shop.mobbexTaxId = mobbexTaxId;
+    }
     await shop.save();
 
     return successResponse(res, { message: 'Credenciales de Mobbex actualizadas correctamente' });
@@ -765,5 +769,86 @@ exports.followShop = async (req, res) => {
   } catch (err) {
     console.error('Error en follow/unfollow shop:', err);
     return errorResponse(res, 'Error al procesar la solicitud de seguimiento', 500);
+  }
+};
+
+// Resumen de tiendas para administración
+exports.getAdminShopsSummary = async (req, res) => {
+  try {
+    const [totalShops, activeShops] = await Promise.all([
+      Shop.countDocuments({}),
+      Shop.countDocuments({ active: true })
+    ]);
+
+    return successResponse(res, { totalShops, activeShops }, 'Resumen de tiendas');
+  } catch (err) {
+    return errorResponse(res, 'Error obteniendo resumen de tiendas', 500, err.message);
+  }
+};
+
+// Listado de tiendas para administración con paginación y filtros
+exports.listAdminShops = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit || '20'), 10)));
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined; // active|inactive
+    const ownerEmail = typeof req.query.ownerEmail === 'string' ? req.query.ownerEmail : undefined;
+
+    const filter = {};
+    if (status === 'active') filter.active = true;
+    else if (status === 'inactive') filter.active = false;
+
+    if (ownerEmail) {
+      const owners = await User.find({ email: ownerEmail }).select('_id').lean();
+      const ownerIds = owners.map(o => o._id);
+      if (ownerIds.length) filter.owner = { $in: ownerIds };
+      else filter.owner = { $in: [] }; // fuerza cero resultados
+    }
+
+    const total = await Shop.countDocuments(filter);
+    const shops = await Shop.find(filter)
+      .select('name subdomain active owner createdAt')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .populate('owner', 'name fullName email');
+
+    return successResponse(res, { total, page, limit, shops }, 'Listado de tiendas');
+  } catch (err) {
+    return errorResponse(res, 'Error al listar tiendas', 500, err.message);
+  }
+};
+
+// Actualizar estado (activo/inactivo) de tienda por administración
+exports.updateShopStateAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { active } = req.body || {};
+    if (typeof active !== 'boolean') {
+      return errorResponse(res, 'active debe ser booleano', 400);
+    }
+    const before = await Shop.findById(id).select('active');
+    const shop = await Shop.findByIdAndUpdate(
+      id,
+      { $set: { active } },
+      { new: true }
+    ).select('name subdomain active owner');
+    if (!shop) {
+      return errorResponse(res, 'Tienda no encontrada', 404);
+    }
+    try {
+      await AuditLog.create({
+        actor: req.user.id,
+        action: 'shop.active.update',
+        entityType: 'Shop',
+        entityId: shop._id,
+        before: { active: before?.active },
+        after: { active: shop.active },
+        metadata: { ip: req.ip }
+      });
+    } catch {}
+    return successResponse(res, { shop }, 'Estado de tienda actualizado');
+  } catch (err) {
+    return errorResponse(res, 'Error actualizando estado de tienda', 500, err.message);
   }
 };

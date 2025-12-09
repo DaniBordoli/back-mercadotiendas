@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('../middlewares/auth');
+const requireAdmin = require('../middlewares/admin');
 const { validateRequest } = require('../middlewares/validate');
 
 const {
@@ -9,7 +10,11 @@ const {
   updatePassword,
   deleteAccount,
   updateAvatar,
-  followUser
+  followUser,
+  getAdminUsersSummary,
+  listAdminUsers,
+  updateUserTypeAdmin,
+  updateUserStatusAdmin
 } = require('../controllers/user.controller');
 
 /**
@@ -66,5 +71,13 @@ router.post('/:id/follow',
   verifyToken,
   followUser
 );
+
+// Resumen de usuarios (admin)
+router.get('/admin/summary', verifyToken, requireAdmin, getAdminUsersSummary);
+
+// Administración de usuarios (admin)
+router.get('/admin', verifyToken, requireAdmin, listAdminUsers);
+router.patch('/admin/:id/userType', verifyToken, requireAdmin, updateUserTypeAdmin);
+router.patch('/admin/:id/status', verifyToken, requireAdmin, updateUserStatusAdmin);
 
 module.exports = router;

@@ -15,6 +15,8 @@ const Dispute = require('./Dispute');
 const DisputeMessage = require('./DisputeMessage');
 const DisputeReason = require('./DisputeReason');
 const ChatMessage = require('./ChatMessage');
+const AuditLog = require('./AuditLog');
+const SystemConfig = require('./SystemConfig');
 
 module.exports = {
   User,
@@ -34,5 +36,7 @@ module.exports = {
   , DisputeMessage
   , DisputeReason
   , ChatMessage
+  , AuditLog
+  , SystemConfig
 };
 

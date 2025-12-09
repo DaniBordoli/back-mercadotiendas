@@ -80,6 +80,15 @@ const validationRules = {
     body('items.*.name')
       .notEmpty().withMessage('El nombre del item es requerido')
       .isString().withMessage('El nombre del item debe ser un texto'),
+    body('items.*.productId')
+      .notEmpty().withMessage('El ID de producto es requerido')
+      .custom((value) => {
+        const base = String(value || '').split('::')[0];
+        if (!/^[0-9a-fA-F]{24}$/.test(base)) {
+          throw new Error('ID de producto inválido');
+        }
+        return true;
+      }),
     body('items.*.price')
       .notEmpty().withMessage('El precio del item es requerido')
       .isNumeric().withMessage('El precio debe ser un número')

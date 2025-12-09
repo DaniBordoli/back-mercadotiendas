@@ -116,4 +116,7 @@ paymentSchema.pre('save', function(next) {
 // Middleware para validar que el usuario existe antes de guardar
 paymentSchema.pre('save', validatePaymentUser);
 
+// Índice compuesto para idempotencia robusta en mobbexId+reference
+paymentSchema.index({ mobbexId: 1, reference: 1 }, { unique: true });
+
 module.exports = mongoose.model('Payment', paymentSchema);

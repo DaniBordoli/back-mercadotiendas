@@ -1,6 +1,5 @@
-// Comentamos Mobbex y usamos el servicio mock
-// const { createCheckout, checkPaymentStatus, processWebhook } = require('../services/mobbex.service');
-const { createCheckout, checkPaymentStatus, processWebhook, simulateSuccessfulWebhook } = require('../services/mock-payment.service');
+const mobbexService = require('../services/mobbex.service');
+const mockService = require('../services/mock-payment.service');
 const { successResponse, errorResponse } = require('../utils/response');
 const Payment = require('../models/Payment');
 const Shop = require('../models/Shop');
@@ -12,6 +11,7 @@ const axios = require('axios');
 // const mobbexConfig = require('../config/mobbex'); // No necesario para mock
 const LiveEventMetrics = require('../models/LiveEventMetrics');
 const LiveEventProductMetrics = require('../models/LiveEventProductMetrics');
+const { emitNotification } = require('../utils/notification');
 
 /**
  * Crea un checkout para un pedido
@@ -47,9 +47,25 @@ const createOrderCheckout = async (req, res) => {
 
     const userId = req.user && req.user.id ? req.user.id : null;
 
-    // Obtener información de los productos y sus tiendas
-    const productIds = items.map((item) => item.productId);
-    const products = await require('../models/Products').find({ _id: { $in: productIds } }).populate('shop', 'name owner mobbexApiKey mobbexAccessToken');
+    // Normalizar IDs de producto (los items del carrito pueden incluir sufijos de variante: "<productId>::<variant>")
+    const normalizeProductId = (pid) => String(pid || '').split('::')[0];
+    const safeItems = (items || []).map((it) => ({
+      ...it,
+      productId: normalizeProductId(it.productId),
+    }));
+
+    // Validar que todos los IDs sean ObjectId válidos
+    const objectIdRegex = /^[0-9a-fA-F]{24}$/;
+    const productIds = safeItems.map((item) => item.productId);
+    const invalidIds = productIds.filter((id) => !objectIdRegex.test(String(id)));
+    if (invalidIds.length > 0) {
+      return errorResponse(res, 'ID de producto inválido en items del pedido', 400);
+    }
+
+    // Obtener información de los productos y sus tiendas usando IDs normalizados
+    const products = await require('../models/Products')
+      .find({ _id: { $in: productIds } })
+      .populate('shop', 'name owner mobbexApiKey mobbexAccessToken mobbexTaxId');
 
     if (!products || products.length === 0) {
       return errorResponse(res, 'No se encontraron los productos especificados', 400);
@@ -62,7 +78,7 @@ const createOrderCheckout = async (req, res) => {
     });
 
     // Preparar ítems, asignando shopName desde la tienda del producto
-    const paymentItems = items.map((item) => {
+    const paymentItems = safeItems.map((item) => {
       const prod = productMap.get(item.productId);
       const shopName = prod && prod.shop ? prod.shop.name : 'Tienda no especificada';
       return {
@@ -75,22 +91,51 @@ const createOrderCheckout = async (req, res) => {
       };
     });
 
-    // Seleccionar la tienda del primer producto para credenciales de pago (asumiendo un único owner)
-    const checkoutShop = products[0].shop;
-    if (!checkoutShop) {
-      return errorResponse(res, 'No se encontró la tienda asociada a los productos', 400);
+    const shopTotals = new Map();
+    for (const item of safeItems) {
+      const prod = productMap.get(item.productId);
+      const shop = prod && prod.shop ? prod.shop : null;
+      const shopId = shop ? shop._id.toString() : null;
+      if (!shopId) continue;
+      const prev = shopTotals.get(shopId) || { total: 0, taxId: shop.mobbexTaxId || null };
+      prev.total += (item.price || 0) * (item.quantity || 1);
+      if (!prev.taxId && shop.mobbexTaxId) prev.taxId = shop.mobbexTaxId;
+      shopTotals.set(shopId, prev);
     }
+    const distinctShopIds = Array.from(shopTotals.keys());
+    const isMixedCart = distinctShopIds.length > 1;
 
     // Generar una referencia única para el pedido que se enviará a Mobbex
     orderData.reference = `order_${Date.now()}`;
 
-    // Crear checkout usando el servicio mock (reemplaza Mobbex temporalmente)
-    console.log('=== BACKEND: Ítems enviados al servicio mock desde controller ===', JSON.stringify(items, null, 2));
-    console.log('=== BACKEND: Llamando al servicio de pago mock ===');
-    const checkoutResponse = await createCheckout(orderData, customerData, items, {
-      mobbexApiKey: checkoutShop.mobbexApiKey || 'mock_api_key',
-      mobbexAccessToken: checkoutShop.mobbexAccessToken || 'mock_access_token',
-    });
+    const modeHeader = (req.headers['x-payment-mode'] || '').toLowerCase();
+    const useReal = modeHeader === 'mobbex';
+    const service = useReal ? mobbexService : mockService;
+
+    let credentials = {};
+    let options = {};
+    if (isMixedCart) {
+      const missingTax = Array.from(shopTotals.values()).some(v => !v.taxId);
+      if (missingTax) {
+        return errorResponse(res, 'Carrito mixto requiere CUIT configurado en todas las tiendas', 400);
+      }
+      const split = distinctShopIds.map(shopId => {
+        const v = shopTotals.get(shopId);
+        return { tax_id: v.taxId, total: Number((v.total || 0).toFixed(2)), reference: shopId };
+      });
+      const sum = split.reduce((acc, s) => acc + s.total, 0);
+      orderData.total = Number(sum.toFixed(2));
+      credentials = { mobbexApiKey: process.env.MOBBEX_API_KEY, mobbexAccessToken: process.env.MOBBEX_ACCESS_TOKEN };
+      options = { split };
+    } else {
+      const checkoutShop = products[0].shop;
+      if (!checkoutShop) {
+        return errorResponse(res, 'No se encontró la tienda asociada a los productos', 400);
+      }
+      credentials = { mobbexApiKey: checkoutShop.mobbexApiKey || process.env.MOBBEX_API_KEY, mobbexAccessToken: checkoutShop.mobbexAccessToken || process.env.MOBBEX_ACCESS_TOKEN };
+    }
+
+    const checkoutResponse = await service.createCheckout(orderData, customerData, items, credentials, options);
 
     console.log('=== BACKEND: Respuesta del servicio mock ===');
     console.log('checkoutResponse:', JSON.stringify(checkoutResponse, null, 2));
@@ -104,7 +149,7 @@ const createOrderCheckout = async (req, res) => {
         reference: orderData.reference,
         amount: orderData.total,
         currency: orderData.currency || 'ARS',
-        status: { code: '1', text: 'Mock Checkout Creado' },
+        status: { code: '1', text: 'Checkout Creado' },
         paymentMethod: null,
         paymentData: checkoutResponse.data,
         items: paymentItems,
@@ -181,13 +226,16 @@ const getPaymentStatus = async (req, res) => {
     }
 
     // Si no existe en nuestra base de datos, consultamos el servicio mock
-    const paymentStatusResponse = await checkPaymentStatus(id);
-
-    if (!paymentStatusResponse.success) {
+    const modeHeader = (req.headers['x-payment-mode'] || '').toLowerCase();
+    const useReal = modeHeader === 'mobbex';
+    const service = useReal ? mobbexService : mockService;
+    const paymentStatusResponse = await service.checkPaymentStatus(id);
+    const success = useReal ? true : !!paymentStatusResponse.success;
+    const data = useReal ? paymentStatusResponse : paymentStatusResponse.data;
+    if (!success) {
       return errorResponse(res, 'Error al obtener el estado del pago', 500);
     }
-
-    return successResponse(res, paymentStatusResponse.data, 'Estado del pago obtenido exitosamente');
+    return successResponse(res, data, 'Estado del pago obtenido exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al verificar el estado del pago', 500, error.message);
   }
@@ -202,9 +250,10 @@ const handleWebhook = async (req, res) => {
   try {
     console.log('=== WEBHOOK RECIBIDO: req.body completo ===', JSON.stringify(req.body, null, 2));
     const webhookData = req.body;
+    webhookData.signature = req.headers['x-signature'];
 
     // Procesar el webhook
-    const paymentInfo = processWebhook(webhookData);
+    const paymentInfo = mobbexService.processWebhook(webhookData);
     
     // Verificar si ya existe este pago en nuestra base de datos por su mobbexId
     // O buscarlo por la referencia (nuestro ID de pago) si es un nuevo webhook para un pago que ya iniciamos
@@ -216,6 +265,9 @@ const handleWebhook = async (req, res) => {
     });
     
     if (payment) {
+      if ((payment.status && (payment.status.code === '2' || payment.status.code === '200')) && (paymentInfo.status && (paymentInfo.status.code === '2' || paymentInfo.status.code === '200'))) {
+        return res.status(200).json({ success: true, message: 'Pago ya procesado' });
+      }
       // Verificar que el pago tenga un usuario válido asociado
       if (!payment.user) {
         console.warn('=== BACKEND: Webhook recibido para un pago sin usuario asociado. Ignorando webhook. PaymentId:', payment._id, '===');
@@ -468,10 +520,8 @@ const completeMockPayment = async (req, res) => {
     }
 
     // Simular webhook exitoso
-    const webhookData = simulateSuccessfulWebhook(paymentId, payment.reference);
-    
-    // Procesar el webhook simulado
-    const paymentInfo = processWebhook(webhookData);
+    const webhookData = mockService.simulateSuccessfulWebhook(paymentId, payment.reference);
+    const paymentInfo = mockService.processWebhook(webhookData);
     
     // Actualizar el pago
     payment.status = paymentInfo.status;

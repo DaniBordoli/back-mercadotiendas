@@ -3,6 +3,7 @@ const router = express.Router();
 const { check, validationResult } = require('express-validator');
 const liveEventController = require('../controllers/liveEvent.controller');
 const { verifyToken } = require('../middlewares/auth');
+const requireAdmin = require('../middlewares/admin');
 const isInfluencer = require('../middlewares/isInfluencer');
 
 // GET /api/live-events - Obtener eventos
@@ -49,6 +50,11 @@ router.get('/funnel', verifyToken, isInfluencer, liveEventController.getAggregat
 router.get('/audience-series', verifyToken, isInfluencer, liveEventController.getAggregatedAudienceSeries);
 // GET /api/live-events/campaign-summary - Resumen de ingresos por campaña
 router.get('/campaign-summary', verifyToken, isInfluencer, liveEventController.getCampaignSummary);
+
+// Resumen de eventos (admin)
+router.get('/admin/summary', verifyToken, requireAdmin, liveEventController.getAdminLiveEventsSummary);
+router.get('/admin', verifyToken, requireAdmin, liveEventController.listAdminLiveEvents);
+router.patch('/admin/:id/status', verifyToken, requireAdmin, liveEventController.updateLiveEventStateAdmin);
 
 // GET /api/live-events/:id - Obtener un evento específico (público con filtrado por estado)
 router.get('/:id', liveEventController.getLiveEvent);

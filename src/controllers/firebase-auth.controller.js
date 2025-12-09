@@ -105,6 +105,14 @@ exports.verifyFirebaseToken = async (req, res) => {
       await user.save();
     }
 
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin@mercadotiendas.com';
+    if (String(user.email || '').toLowerCase() === String(adminEmail || '').toLowerCase()) {
+      const types = Array.from(new Set([...(user.userType || []), 'admin']));
+      user.userType = types;
+      user.isActivated = true;
+      await user.save();
+    }
+
     // Generar tokens de acceso y refresco
     const accessToken = generateAccessToken({
       id: user._id,

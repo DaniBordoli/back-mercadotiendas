@@ -12,27 +12,33 @@ const initDB = async () => {
     });
     console.log('Connected to MongoDB');
 
-    // Verificar si ya existe un admin
-    const adminExists = await User.findOne({ userType: 'admin' });
-    if (adminExists) {
-      console.log('Admin user already exists');
-      process.exit(0);
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin@mercadotiendas.com';
+    const adminPassword = process.env.ADMIN_PASSWORD || 'admin123456';
+
+    const existingByEmail = await User.findOne({ email: adminEmail });
+    if (existingByEmail) {
+      const nextRoles = Array.from(new Set([...(existingByEmail.userType || []), 'admin']));
+      existingByEmail.userType = nextRoles;
+      existingByEmail.isActivated = true;
+      existingByEmail.name = existingByEmail.name || existingByEmail.fullName || 'Admin';
+      if (!existingByEmail.password) {
+        existingByEmail.password = await existingByEmail.encryptPassword(adminPassword);
+      }
+      await existingByEmail.save();
+      console.log('Existing user promoted to admin');
+    } else {
+      const adminUser = new User({
+        name: 'Admin',
+        fullName: 'Admin',
+        email: adminEmail,
+        password: adminPassword,
+        userType: ['admin'],
+        isActivated: true
+      });
+      adminUser.password = await adminUser.encryptPassword(adminUser.password);
+      await adminUser.save();
+      console.log('Admin user created successfully');
     }
-
-    // Crear usuario admin
-    const adminUser = new User({
-      fullName: 'Admin',
-      email: process.env.ADMIN_EMAIL || 'admin@mercadotiendas.com',
-      password: process.env.ADMIN_PASSWORD || 'admin123456',
-      userType: ['admin']
-    });
-
-    // Encriptar contraseña
-    adminUser.password = await adminUser.encryptPassword(adminUser.password);
-
-    // Guardar admin
-    await adminUser.save();
-    console.log('Admin user created successfully');
 
     process.exit(0);
   } catch (error) {

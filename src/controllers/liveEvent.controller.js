@@ -1,6 +1,6 @@
 const { validationResult } = require('express-validator');
 const mongoose = require('mongoose');
-const { LiveEvent, User, LiveEventMetrics, LiveEventProductMetrics } = require('../models');
+const { LiveEvent, User, LiveEventMetrics, LiveEventProductMetrics, AuditLog } = require('../models');
 const { ChatMessage } = require('../models');
 const NotificationService = require('../services/notification.service');
 const { NotificationTypes } = require('../constants/notificationTypes');
@@ -1402,5 +1402,121 @@ exports.getAggregatedAudienceSeries = async (req, res) => {
   } catch (error) {
     console.error('Error agregando audiencia', error);
     return res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+  }
+};
+
+exports.getAdminLiveEventsSummary = async (req, res) => {
+  try {
+    const [totalEvents, draftEvents, publishedEvents, liveEvents, finishedEvents, linkedCampaignEvents] = await Promise.all([
+      require('../models/LiveEvent').countDocuments({}),
+      require('../models/LiveEvent').countDocuments({ status: 'draft' }),
+      require('../models/LiveEvent').countDocuments({ status: 'published' }),
+      require('../models/LiveEvent').countDocuments({ status: 'live' }),
+      require('../models/LiveEvent').countDocuments({ status: 'finished' }),
+      require('../models/LiveEvent').countDocuments({ campaign: { $ne: null } })
+    ]);
+
+    return res.json({
+      success: true,
+      data: { totalEvents, draftEvents, publishedEvents, liveEvents, finishedEvents, linkedCampaignEvents },
+      message: 'Resumen de eventos en vivo'
+    });
+  } catch (error) {
+    console.error('Error obteniendo resumen de eventos en vivo', error);
+    return res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+  }
+};
+
+exports.listAdminLiveEvents = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit || '20'), 10)));
+    const { status, ownerEmail, campaignId } = req.query || {};
+
+    const filter = {};
+    if (status) filter.status = status;
+    if (campaignId) filter.campaign = campaignId;
+
+    if (ownerEmail && typeof ownerEmail === 'string' && ownerEmail.trim() !== '') {
+      const owners = await User.find({ email: new RegExp(`^${ownerEmail}`, 'i') }).select('_id');
+      const ownerIds = owners.map(u => u._id);
+      if (ownerIds.length > 0) filter.owner = { $in: ownerIds };
+      else filter.owner = null;
+    }
+
+    const total = await LiveEvent.countDocuments(filter);
+    const events = await LiveEvent.find(filter)
+      .select('title startDateTime status owner campaign youtubeVideoId')
+      .populate({ path: 'owner', select: 'name fullName email avatar' })
+      .populate({ path: 'campaign', select: '_id name' })
+      .sort({ startDateTime: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit);
+
+    return res.json({ success: true, data: { total, page, limit, events } });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Error listando eventos', error: error.message });
+  }
+};
+
+exports.updateLiveEventStateAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, youtubeVideoId } = req.body || {};
+    const allowed = ['draft', 'published', 'live', 'finished'];
+    if (!allowed.includes(String(status))) {
+      return res.status(400).json({ success: false, message: 'Estado inválido' });
+    }
+
+    const event = await LiveEvent.findById(id);
+    if (!event) {
+      return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+    }
+
+    const prevStatus = event.status;
+    const before = { status: prevStatus };
+
+    if (status !== prevStatus) {
+      if (status === 'live' && prevStatus !== 'live') {
+        event.endedAt = null;
+        if (!event.startDateTime || event.startDateTime > new Date()) {
+          event.startDateTime = new Date();
+        }
+        try {
+          const YoutubeMonitor = require('../services/youtube.monitor');
+          const vid = youtubeVideoId !== undefined ? youtubeVideoId : event.youtubeVideoId;
+          if (vid) {
+            YoutubeMonitor.start(event._id.toString(), vid);
+          }
+        } catch (_) {}
+      }
+      if (status === 'finished' && prevStatus !== 'finished') {
+        event.endedAt = new Date();
+        try {
+          const YoutubeMonitor = require('../services/youtube.monitor');
+          YoutubeMonitor.stop(event._id.toString());
+        } catch (_) {}
+      }
+    }
+
+    event.status = status;
+    if (youtubeVideoId !== undefined) event.youtubeVideoId = youtubeVideoId;
+    await event.save();
+
+    try {
+      await AuditLog.create({
+        actor: req.user.id,
+        action: 'liveEvent.status.update',
+        entityType: 'LiveEvent',
+        entityId: event._id,
+        before,
+        after: { status: event.status },
+        metadata: { ip: req.ip }
+      });
+    } catch (_) {}
+
+    return res.json({ success: true, data: event, message: 'Estado de evento actualizado' });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Error actualizando estado', error: error.message });
   }
 };

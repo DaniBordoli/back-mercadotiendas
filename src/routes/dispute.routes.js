@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const { verifyToken } = require('../middlewares/auth');
+const requireAdmin = require('../middlewares/admin');
 const disputeController = require('../controllers/dispute.controller');
 
 const storage = multer.memoryStorage();
@@ -14,5 +15,9 @@ router.get('/:id', verifyToken, disputeController.getDisputeById);
 router.post('/:id/messages', verifyToken, upload.array('files', 3), disputeController.createMessage);
 router.post('/:id/request-info', verifyToken, upload.none(), disputeController.requestInfo);
 router.post('/:id/proposal', verifyToken, upload.none(), disputeController.proposal);
+
+// Rutas de administración de disputas
+router.get('/admin', verifyToken, requireAdmin, disputeController.listAdminDisputes);
+router.patch('/admin/:id/state', verifyToken, requireAdmin, disputeController.updateDisputeStateAdmin);
 
 module.exports = router;
