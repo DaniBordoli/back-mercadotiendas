@@ -163,6 +163,14 @@ const validationRules = {
       })
   ],
 
+  verifyTwoFactor: [
+    body('token')
+      .trim()
+      .notEmpty().withMessage('El código es requerido')
+      .isLength({ min: 6, max: 6 }).withMessage('El código debe tener 6 dígitos')
+      .isNumeric().withMessage('El código debe contener solo números')
+  ],
+
   resetPassword: [
     param('token')
       .trim()

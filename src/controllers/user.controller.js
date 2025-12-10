@@ -6,6 +6,8 @@ const NotificationService = require('../services/notification.service');
 const { NotificationTypes } = require('../constants/notificationTypes');
 const multer = require('multer');
 const AuditLog = require('../models/AuditLog');
+const speakeasy = require('speakeasy');
+const qrcode = require('qrcode');
 
 // Configurar multer para manejar la carga de archivos en memoria
 const upload = multer({
@@ -25,7 +27,7 @@ const getProfile = async (req, res) => {
   try {
     // Seleccionamos los campos específicos que queremos devolver
   const user = await User.findById(req.user.id)
-      .select('name email birthDate city province country userPhone shop avatar userType preferredAddress youtubeTokens sellerProfile influencerProfile followers')
+      .select('name email birthDate city province country userPhone shop avatar userType preferredAddress youtubeTokens sellerProfile influencerProfile followers preferences twoFactorEnabled')
       .populate('shop');
     if (!user) {
       return errorResponse(res, 'Usuario no encontrado', 404);
@@ -86,7 +88,7 @@ const updateAvatar = async (req, res) => {
 
 const updateProfile = async (req, res) => {
   try {
-    const { name, email, birthDate, city, province, country, userPhone, userType, preferredAddress, sellerProfile, influencerProfile } = req.body;
+    const { name, email, birthDate, city, province, country, userPhone, userType, preferredAddress, sellerProfile, influencerProfile, preferences, twoFactorEnabled } = req.body;
 
     // Verificar si el nuevo email ya está en uso
     if (email) {
@@ -112,6 +114,19 @@ const updateProfile = async (req, res) => {
     if (preferredAddress) user.preferredAddress = preferredAddress;
     if (sellerProfile) user.sellerProfile = sellerProfile;
     if (influencerProfile) user.influencerProfile = influencerProfile;
+    if (preferences && typeof preferences === 'object') {
+      const current = user.preferences || {};
+      user.preferences = {
+        ...current,
+        ...(typeof preferences.emailNotifications === 'boolean' ? { emailNotifications: preferences.emailNotifications } : {}),
+        ...(typeof preferences.inAppNotifications === 'boolean' ? { inAppNotifications: preferences.inAppNotifications } : {}),
+        ...(typeof preferences.language === 'string' ? { language: preferences.language } : {}),
+        ...(typeof preferences.timezone === 'string' ? { timezone: preferences.timezone } : {})
+      };
+    }
+    if (typeof twoFactorEnabled === 'boolean') {
+      user.twoFactorEnabled = twoFactorEnabled;
+    }
     if (userType && Array.isArray(userType)) {
       // Validar que todos los tipos sean válidos
       const validTypes = ['buyer', 'seller', 'influencer', 'admin'];
@@ -373,6 +388,66 @@ async function updateUserStatusAdmin(req, res) {
   }
 }
 
+const setupTwoFactor = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return errorResponse(res, 'Usuario no encontrado', 404);
+    }
+    const secret = speakeasy.generateSecret({ name: `MercadoTiendas (${user.email || user.name || 'usuario'})` });
+    user.twoFactorSecret = secret.base32;
+    user.twoFactorEnabled = false;
+    await user.save();
+    const otpauthUrl = secret.otpauth_url;
+    const qrDataUrl = await qrcode.toDataURL(otpauthUrl);
+    return successResponse(res, { otpauthUrl, qrDataUrl });
+  } catch (err) {
+    return errorResponse(res, 'Error al configurar 2FA', 500, err.message);
+  }
+};
+
+const verifyTwoFactor = async (req, res) => {
+  try {
+    const { token } = req.body;
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return errorResponse(res, 'Usuario no encontrado', 404);
+    }
+    if (!user.twoFactorSecret) {
+      return errorResponse(res, '2FA no configurado', 400);
+    }
+    const verified = speakeasy.totp.verify({
+      secret: user.twoFactorSecret,
+      encoding: 'base32',
+      token: String(token || ''),
+      window: 1
+    });
+    if (!verified) {
+      return errorResponse(res, 'Código inválido', 400);
+    }
+    user.twoFactorEnabled = true;
+    await user.save();
+    return successResponse(res, { enabled: true });
+  } catch (err) {
+    return errorResponse(res, 'Error al verificar 2FA', 500, err.message);
+  }
+};
+
+const disableTwoFactor = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return errorResponse(res, 'Usuario no encontrado', 404);
+    }
+    user.twoFactorEnabled = false;
+    user.twoFactorSecret = null;
+    await user.save();
+    return successResponse(res, { enabled: false });
+  } catch (err) {
+    return errorResponse(res, 'Error al desactivar 2FA', 500, err.message);
+  }
+};
+
 module.exports = {
   getProfile,
   updateProfile,
@@ -384,5 +459,8 @@ module.exports = {
   ,
   listAdminUsers,
   updateUserTypeAdmin,
-  updateUserStatusAdmin
+  updateUserStatusAdmin,
+  setupTwoFactor,
+  verifyTwoFactor,
+  disableTwoFactor
 };

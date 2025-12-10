@@ -41,10 +41,10 @@ exports.createLiveEvent = async (req, res) => {
       return res.status(400).json({ success: false, message: 'La fecha y hora no pueden estar en el pasado' });
     }
 
-        // Asegurarse de que el usuario autenticado tiene el tipo "influencer" (el middleware debería manejarlo, pero se verifica por seguridad)
     const user = await User.findById(req.user._id);
-    if (!user || !user.userType?.includes('influencer')) {
-      return res.status(403).json({ success: false, message: 'Solo los influencers pueden crear eventos en vivo' });
+    const types = Array.isArray(user?.userType) ? user.userType.map(t => String(t).toLowerCase()) : [];
+    if (!user || !(types.includes('influencer') || types.includes('seller') || types.includes('vendedor'))) {
+      return res.status(403).json({ success: false, message: 'Solo influencers o vendedores pueden crear eventos en vivo' });
     }
 
     const liveEvent = new LiveEvent({

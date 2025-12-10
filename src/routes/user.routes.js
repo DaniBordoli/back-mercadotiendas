@@ -14,7 +14,10 @@ const {
   getAdminUsersSummary,
   listAdminUsers,
   updateUserTypeAdmin,
-  updateUserStatusAdmin
+  updateUserStatusAdmin,
+  setupTwoFactor,
+  verifyTwoFactor,
+  disableTwoFactor
 } = require('../controllers/user.controller');
 
 /**
@@ -79,5 +82,9 @@ router.get('/admin/summary', verifyToken, requireAdmin, getAdminUsersSummary);
 router.get('/admin', verifyToken, requireAdmin, listAdminUsers);
 router.patch('/admin/:id/userType', verifyToken, requireAdmin, updateUserTypeAdmin);
 router.patch('/admin/:id/status', verifyToken, requireAdmin, updateUserStatusAdmin);
+
+router.post('/2fa/setup', verifyToken, setupTwoFactor);
+router.post('/2fa/verify', verifyToken, validateRequest('verifyTwoFactor'), verifyTwoFactor);
+router.delete('/2fa', verifyToken, disableTwoFactor);
 
 module.exports = router;
