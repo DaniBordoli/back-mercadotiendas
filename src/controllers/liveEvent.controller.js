@@ -1,4 +1,5 @@
 const { validationResult } = require('express-validator');
+const crypto = require('crypto');
 const mongoose = require('mongoose');
 const { LiveEvent, User, LiveEventMetrics, LiveEventProductMetrics, AuditLog } = require('../models');
 const { ChatMessage } = require('../models');
@@ -19,7 +20,7 @@ exports.createLiveEvent = async (req, res) => {
     }
 
     // In createLiveEvent, after destructuring req.body
-    const { title, description, date, time, status, products = [], socialAccounts = [], youtubeVideoId, campaign } = req.body;
+    const { title, description, date, time, status, products = [], socialAccounts = [], youtubeVideoId, campaign, platform } = req.body;
 
     let startDateTime;
     try {
@@ -57,6 +58,7 @@ exports.createLiveEvent = async (req, res) => {
       socialAccounts,
       campaign,
       youtubeVideoId,
+      platform,
     });
 
     await liveEvent.save();
@@ -70,6 +72,246 @@ exports.createLiveEvent = async (req, res) => {
   } catch (error) {
     console.error('Error al crear evento en vivo:', error);
     res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+  }
+};
+
+exports.setupMuxLive = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const isValidObjectId = mongoose.Types.ObjectId.isValid(id);
+    const eventQuery = isValidObjectId ? { _id: id } : { slug: id };
+    eventQuery.owner = req.user._id;
+    const event = await LiveEvent.findOne(eventQuery);
+    if (!event) {
+      return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+    }
+    const forceNew = String(req.query.force || '').toLowerCase() === 'true';
+    const hasCreds = !!(process.env.MUX_TOKEN_ID && process.env.MUX_TOKEN_SECRET);
+    if (!forceNew && event.muxLiveStreamId && event.muxPlaybackId && event.muxStreamKey) {
+      return res.json({
+        success: true,
+        data: {
+          muxLiveStreamId: event.muxLiveStreamId,
+          muxPlaybackId: event.muxPlaybackId,
+          ingest: { url: 'rtmp://global-live.mux.com:5222/app', streamKey: event.muxStreamKey },
+        },
+      });
+    }
+    if (!hasCreds) {
+      return res.status(500).json({ success: false, message: 'Credenciales Mux faltantes' });
+    }
+    const { createLiveStream } = require('../services/mux.service');
+    const created = await createLiveStream({ test: String(process.env.MUX_TEST_MODE || '').toLowerCase() === 'true' });
+    event.platform = event.platform || 'mux';
+    event.muxLiveStreamId = created.id || null;
+    event.muxPlaybackId = created.playbackId || null;
+    event.muxStatus = created.status || null;
+    event.muxStreamKey = created.streamKey || null;
+    await event.save();
+    return res.json({
+      success: true,
+      data: {
+        muxLiveStreamId: event.muxLiveStreamId,
+        muxPlaybackId: event.muxPlaybackId,
+        ingest: { url: created.rtmpUrl, streamKey: created.streamKey },
+      },
+    });
+  } catch (error) {
+    try {
+      const status = error?.code || error?.response?.status;
+      const payload = error?.response?.data;
+      console.error('setupMuxLive error', status || '', error?.message || '', payload || '');
+    } catch (_) {}
+    return res.status(500).json({ success: false, message: 'Error configurando Mux', error: error.message });
+  }
+};
+
+exports.startMuxRelay = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const isValidObjectId = mongoose.Types.ObjectId.isValid(id);
+    const eventQuery = isValidObjectId ? { _id: id } : { slug: id };
+    eventQuery.owner = req.user._id;
+    const event = await LiveEvent.findOne(eventQuery).select('_id muxLiveStreamId muxPlaybackId status');
+    if (!event) {
+      return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+    }
+    let ingestUrl = typeof req.query.url === 'string' && req.query.url ? String(req.query.url) : 'rtmp://global-live.mux.com:5222/app';
+    const transport = String(req.query.transport || '').toLowerCase();
+    try {
+      const raw = ingestUrl.trim();
+      if (raw.startsWith('rtmp://') && transport !== 'rtmp') {
+        // Preferir RTMPS (443) salvo que el cliente pida RTMP plano (transport=rtmp)
+        const hostPath = raw.slice('rtmp://'.length);
+        const parts = hostPath.split('/');
+        const host = parts.shift() || 'global-live.mux.com:5222';
+        const [hostname, port] = host.split(':');
+        const safePort = port && port !== '' ? port : '5222';
+        const finalPort = safePort === '5222' ? '443' : safePort;
+        ingestUrl = `rtmps://${hostname}:${finalPort}/${parts.join('/')}`;
+      }
+    } catch (_) {}
+    const streamKey = typeof req.query.key === 'string' ? String(req.query.key) : '';
+    if (!streamKey) {
+      return res.status(400).json({ success: false, message: 'streamKey faltante' });
+    }
+    const dest = `${ingestUrl.replace(/\/+$/, '')}/${streamKey}`;
+    try {
+      const proto = ingestUrl.startsWith('rtmps://') ? 'rtmps' : (ingestUrl.startsWith('rtmp://') ? 'rtmp' : 'other');
+      const hostPart = ingestUrl.replace(/^rtmps?:\/\//, '').split('/')[0];
+      console.info('muxRelay: request accepted', {
+        eventId: String(event._id),
+        protocol: proto,
+        host: hostPart,
+        streamKeyLen: streamKey.length,
+      });
+    } catch (_) {}
+    const ffmpegStatic = require('ffmpeg-static');
+    const ffmpegPath = process.env.FFMPEG_PATH || ffmpegStatic || 'ffmpeg';
+    const { spawn } = require('child_process');
+    const args = [
+      '-re',
+      '-f', 'webm',
+      '-i', 'pipe:0',
+      '-fflags', '+genpts',
+      '-c:v', 'libx264',
+      '-pix_fmt', 'yuv420p',
+      '-preset', 'veryfast',
+      '-tune', 'zerolatency',
+      '-profile:v', 'baseline',
+      '-b:v', '2500k',
+      '-maxrate', '2500k',
+      '-bufsize', '5000k',
+      '-r', '30',
+      '-g', '60',
+      '-keyint_min', '60',
+      '-sc_threshold', '0',
+      '-max_interleave_delta', '0',
+      '-c:a', 'aac',
+      '-ar', '44100',
+      '-b:a', '128k',
+      '-f', 'flv',
+      '-rtmp_live', 'live',
+      dest
+    ];
+    const ffmpeg = spawn(ffmpegPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    try {
+      console.info('muxRelay: ffmpeg started', { pid: ffmpeg.pid, eventId: String(event._id) });
+    } catch (_) {}
+    const io = req.app.get('io');
+    if (io && event._id) {
+      io.to(`event_${event._id}`).emit('muxRelayState', { eventId: String(event._id), state: 'starting' });
+    }
+    let closed = false;
+    let firstChunk = true;
+    let totalBytes = 0;
+    req.on('data', (chunk) => {
+      try { ffmpeg.stdin.write(chunk); } catch (_) {}
+      totalBytes += chunk.length || 0;
+      if (firstChunk) {
+        firstChunk = false;
+        if (io && event._id) {
+          io.to(`event_${event._id}`).emit('muxRelayState', { eventId: String(event._id), state: 'streaming' });
+        }
+        try {
+          console.info('muxRelay: first media chunk received', { eventId: String(event._id) });
+        } catch (_) {}
+      }
+    });
+    const endAll = () => {
+      if (closed) return;
+      closed = true;
+      try { ffmpeg.stdin.end(); } catch (_) {}
+    };
+    req.on('end', endAll);
+    req.on('aborted', endAll);
+    req.on('close', endAll);
+    ffmpeg.on('close', (code, signal) => {
+      if (io && event._id) {
+        io.to(`event_${event._id}`).emit('muxRelayState', { eventId: String(event._id), state: 'closed' });
+      }
+      try {
+        console.info('muxRelay: ffmpeg closed', { eventId: String(event._id), code, signal, totalBytes });
+      } catch (_) {}
+      if (!res.headersSent) {
+        res.status(200).json({ success: true });
+      }
+    });
+    ffmpeg.on('error', (err) => {
+      if (io && event._id) {
+        io.to(`event_${event._id}`).emit('muxRelayState', { eventId: String(event._id), state: 'error' });
+      }
+      try {
+        console.error('muxRelay: ffmpeg error', { eventId: String(event._id), message: err?.message });
+      } catch (_) {}
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, message: 'Error iniciando ffmpeg' });
+      }
+    });
+    ffmpeg.stderr.on('data', (chunk) => {
+      try {
+        const msg = chunk.toString();
+        if (io && event._id) {
+          io.to(`event_${event._id}`).emit('muxRelayLog', { eventId: String(event._id), log: msg });
+        }
+        if (/error|fail|denied|invalid|unauthorized/i.test(msg)) {
+          console.error('muxRelay: ffmpeg stderr', { eventId: String(event._id), msg: msg.slice(0, 200) });
+        }
+      } catch (_) {}
+    });
+    res.setHeader('Connection', 'keep-alive');
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Error iniciando relay Mux' });
+  }
+};
+
+exports.handleMuxWebhook = async (req, res) => {
+  try {
+    const secret = process.env.MUX_WEBHOOK_SECRET;
+    if (!secret) {
+      return res.status(500).json({ success: false, message: 'MUX_WEBHOOK_SECRET faltante' });
+    }
+    const sigHeader = req.headers['mux-signature'] || '';
+    const raw = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body || {});
+    const computed = crypto.createHmac('sha256', secret).update(raw).digest('hex');
+    const parts = String(sigHeader).split(',').map(s => s.trim());
+    const valid = parts.some(p => p.startsWith('v1=') && p.slice(3) === computed);
+    if (!valid) {
+      return res.status(400).json({ success: false, message: 'Firma inválida' });
+    }
+    const evt = req.body || {};
+    const type = String(evt.type || '').toLowerCase();
+    const data = evt.data || {};
+    let liveStreamId = data.id || data.live_stream_id || data.source_live_stream_id || null;
+    let event = null;
+    if (liveStreamId) {
+      event = await LiveEvent.findOne({ muxLiveStreamId: liveStreamId }).select('_id status muxAssetId muxPlaybackId');
+    }
+    if (!event && data.asset_id) {
+      event = await LiveEvent.findOne({ muxAssetId: data.asset_id }).select('_id status muxAssetId muxPlaybackId');
+    }
+    if (!event) {
+      return res.json({ success: true });
+    }
+    let newStatus = null;
+    if (type.includes('live_stream.connected') || type.includes('live_stream.active')) newStatus = 'live';
+    else if (type.includes('live_stream.disconnected') || type.includes('live_stream.idle') || type.includes('asset.ready')) newStatus = 'finished';
+    if (type.includes('asset.ready') && data.id && !event.muxAssetId) {
+      event.muxAssetId = String(data.id);
+    }
+    if (newStatus && event.status !== newStatus) {
+      event.status = newStatus;
+      if (newStatus === 'finished') event.endedAt = new Date();
+    }
+    event.muxStatus = type;
+    await event.save();
+    const io = req.app.get('io');
+    if (io && event._id) {
+      io.to(`event_${event._id}`).emit('metricsUpdate', { eventId: String(event._id), status: event.status, muxStatus: event.muxStatus });
+    }
+    return res.json({ success: true });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Error procesando webhook de Mux' });
   }
 };
 

@@ -75,6 +75,36 @@ const liveEventSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    platform: {
+      type: String,
+      trim: true,
+      lowercase: true,
+    },
+    muxLiveStreamId: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    muxPlaybackId: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    muxStreamKey: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    muxAssetId: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    muxStatus: {
+      type: String,
+      trim: true,
+      default: null,
+    },
     slug: {
       type: String,
       unique: true,

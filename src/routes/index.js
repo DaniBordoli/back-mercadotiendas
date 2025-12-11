@@ -15,6 +15,7 @@ const currencyRoutes = require('./currency.routes');
 const shopInstitutionalRoutes = require('./shopInstitutional.routes');
 const campaignRoutes = require('./campaign.routes');
 const liveEventRoutes = require('./liveEvent.routes');
+const liveEventController = require('../controllers/liveEvent.controller');
 const productQuestionRoutes = require('./productQuestion.routes');
 const productReviewRoutes = require('./productReview.routes');
 const campaignApplicationRoutes = require('./campaignApplication.routes');
@@ -90,6 +91,7 @@ router.use('/shop-institutional', shopInstitutionalRoutes);
 // Rutas de campañas (/api/campaigns/*)
 router.use('/campaigns', campaignRoutes);
 router.use('/live-events', liveEventRoutes);
+router.post('/mux/webhook', liveEventController.handleMuxWebhook);
 
 // Rutas de aplicaciones a campañas (/api/applications/*)
 router.use('/applications', campaignApplicationRoutes);

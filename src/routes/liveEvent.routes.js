@@ -79,6 +79,11 @@ router.post('/:id/viewers-snapshot', liveEventController.createViewerSnapshot);
 // GET /api/live-events/:id/viewer-series - Obtener serie de espectadores
 router.get('/:id/viewer-series', liveEventController.getViewerSeries);
 
+// POST /api/live-events/:id/mux/setup - Crear Live Stream en Mux y devolver ingest
+router.post('/:id/mux/setup', verifyToken, isInfluencer, liveEventController.setupMuxLive);
+// POST /api/live-events/:id/mux/relay - Iniciar relay HTTP -> RTMP hacia Mux (influencer autenticado)
+router.post('/:id/mux/relay', verifyToken, isInfluencer, liveEventController.startMuxRelay);
+
 // POST /api/live-events - Crear un nuevo evento en vivo (influencer autenticado)
 router.post('/',
   verifyToken,
