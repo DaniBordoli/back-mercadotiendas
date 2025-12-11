@@ -273,9 +273,30 @@ exports.handleMuxWebhook = async (req, res) => {
     }
     const sigHeader = req.headers['mux-signature'] || '';
     const raw = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body || {});
-    const computed = crypto.createHmac('sha256', secret).update(raw).digest('hex');
-    const parts = String(sigHeader).split(',').map(s => s.trim());
-    const valid = parts.some(p => p.startsWith('v1=') && p.slice(3) === computed);
+    const parts = String(sigHeader).split(',').map(s => s.trim()).filter(Boolean);
+    const timestamp = parts.find(p => p.startsWith('t='))?.slice(2);
+    const signatures = parts.filter(p => p.startsWith('v1=')).map(p => p.slice(3));
+
+    const expected = timestamp
+      ? crypto.createHmac('sha256', secret).update(`${timestamp}.${raw}`).digest('hex')
+      : null;
+
+    const toleranceSec = Number(process.env.MUX_WEBHOOK_TOLERANCE || 300);
+    const isFresh = timestamp && !Number.isNaN(Number(timestamp))
+      ? Math.abs(Date.now() / 1000 - Number(timestamp)) <= toleranceSec
+      : false;
+
+    const expectedBuf = expected ? Buffer.from(expected, 'hex') : null;
+    const valid = !!(expectedBuf && isFresh && signatures.some(sig => {
+      try {
+        const sigBuf = Buffer.from(sig, 'hex');
+        if (sigBuf.length !== expectedBuf.length) return false;
+        return crypto.timingSafeEqual(sigBuf, expectedBuf);
+      } catch (_) {
+        return false;
+      }
+    }));
+
     if (!valid) {
       return res.status(400).json({ success: false, message: 'Firma inválida' });
     }
