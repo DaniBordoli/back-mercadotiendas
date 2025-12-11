@@ -267,7 +267,7 @@ exports.startMuxRelay = async (req, res) => {
 
 exports.handleMuxWebhook = async (req, res) => {
   try {
-    const secret = process.env.MUX_WEBHOOK_SECRET;
+    const secret = (process.env.MUX_WEBHOOK_SECRET || '').trim();
     if (!secret) {
       return res.status(500).json({ success: false, message: 'MUX_WEBHOOK_SECRET faltante' });
     }
