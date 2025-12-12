@@ -262,9 +262,9 @@ io.on('connection', (socket) => {
 
   const handleMuxRelayStart = (payload) => {
     const eventId = payload?.eventId;
-    const rtmpUrl = payload?.rtmpUrl;
+    const rtmpUrl = payload?.rtmpUrl || 'rtmp://global-live.mux.com:5222/app';
     const streamKey = payload?.streamKey;
-    if (!eventId || !rtmpUrl || !streamKey) return;
+    if (!eventId || !streamKey) return;
 
     if (muxRelay && muxRelay.proc) {
       try {
@@ -275,12 +275,21 @@ io.on('connection', (socket) => {
       } catch {}
       muxRelay = null;
     }
+    if (socket.data && socket.data.ffmpegProcess) {
+      try {
+        if (socket.data.ffmpegProcess.stdin.writable) {
+          socket.data.ffmpegProcess.stdin.end();
+        }
+        socket.data.ffmpegProcess.kill('SIGTERM');
+      } catch {}
+      socket.data.ffmpegProcess = null;
+    }
 
     const finalUrl = `${rtmpUrl.replace(/\/+$/, '')}/${streamKey}`;
     const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
     const args = [
       '-re',
-      '-i', 'pipe:0',
+      '-i', '-',
       '-c:v', 'libx264',
       '-preset', 'veryfast',
       '-tune', 'zerolatency',
@@ -293,6 +302,8 @@ io.on('connection', (socket) => {
 
     const proc = spawn(ffmpegPath, args, { stdio: ['pipe', 'ignore', 'pipe'] });
     muxRelay = { eventId, proc };
+    socket.data = socket.data || {};
+    socket.data.ffmpegProcess = proc;
 
     const room = `event_${eventId}`;
     try {
@@ -317,10 +328,13 @@ io.on('connection', (socket) => {
 
   const handleMuxRelayChunk = (payload) => {
     const eventId = payload?.eventId;
-    const chunk = payload?.chunk;
+    const raw = payload?.chunk ?? payload?.data;
     if (!muxRelay || !muxRelay.proc || muxRelay.eventId !== eventId) return;
-    if (!chunk || !muxRelay.proc.stdin.writable) return;
-    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    if (!raw || !muxRelay.proc.stdin.writable) return;
+    let buf;
+    if (Buffer.isBuffer(raw)) buf = raw;
+    else if (raw instanceof ArrayBuffer) buf = Buffer.from(raw);
+    else buf = Buffer.from(raw);
     try {
       muxRelay.proc.stdin.write(buf);
     } catch {}
@@ -336,6 +350,9 @@ io.on('connection', (socket) => {
       muxRelay.proc.kill('SIGTERM');
     } catch {}
     muxRelay = null;
+    if (socket.data && socket.data.ffmpegProcess) {
+      socket.data.ffmpegProcess = null;
+    }
   };
 
   socket.on('joinUserRoom', (userId) => {
@@ -353,6 +370,7 @@ io.on('connection', (socket) => {
   socket.on('start-stream', handleMuxRelayStart);
   socket.on('stream-data', handleMuxRelayChunk);
   socket.on('stop-stream', handleMuxRelayStop);
+  socket.on('end-stream', handleMuxRelayStop);
 
   socket.on('disconnect', async () => {
     console.log('Cliente Socket.IO desconectado:', socket.id);
