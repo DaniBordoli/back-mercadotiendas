@@ -332,6 +332,9 @@ exports.handleMuxWebhook = async (req, res) => {
     }
     return res.json({ success: true });
   } catch (error) {
+    try {
+      console.error('handleMuxWebhook error', error?.message || error);
+    } catch (_) {}
     return res.status(500).json({ success: false, message: 'Error procesando webhook de Mux' });
   }
 };

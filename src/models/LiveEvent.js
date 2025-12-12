@@ -118,7 +118,9 @@ const liveEventSchema = new mongoose.Schema(
 // Pre-save middleware for slug generation and updatedAt
 liveEventSchema.pre('save', function (next) {
   // Generate slug only if not present or title changed
-  if (!this.slug || this.isModified('title')) {
+  const hasTitle = typeof this.title === 'string' && this.title.trim() !== '';
+  const shouldGenerateSlug = hasTitle && (!this.slug || this.isModified('title'));
+  if (shouldGenerateSlug) {
     const baseSlug = slugify(this.title, { lower: true, strict: true });
     const uniqueSuffix = Date.now().toString(36);
     this.slug = `${baseSlug}-${uniqueSuffix}`;
