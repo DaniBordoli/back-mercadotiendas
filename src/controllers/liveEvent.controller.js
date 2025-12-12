@@ -113,7 +113,7 @@ exports.setupMuxLive = async (req, res) => {
       });
     }
     if (!hasCreds) {
-      return res.status(500).json({ success: false, message: 'Credenciales Mux faltantes' });
+      return res.status(500).json({ success: false, message: 'Faltan variables de entorno en el servidor' });
     }
     const created = await createLiveStream({ test: String(process.env.MUX_TEST_MODE || '').toLowerCase() === 'true' });
     event.platform = event.platform || 'mux';

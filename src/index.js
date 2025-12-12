@@ -260,16 +260,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('joinUserRoom', (userId) => {
-    if (userId) {
-      socket.join(`user_${userId}`);
-      socket.data = socket.data || {};
-      socket.data.joinedUserId = userId;
-      console.log(`Socket ${socket.id} joined user room user_${userId}`);
-    }
-  });
-
-  socket.on('muxRelayStart', (payload) => {
+  const handleMuxRelayStart = (payload) => {
     const eventId = payload?.eventId;
     const rtmpUrl = payload?.rtmpUrl;
     const streamKey = payload?.streamKey;
@@ -322,9 +313,9 @@ io.on('connection', (socket) => {
       } catch {}
       muxRelay = null;
     });
-  });
+  };
 
-  socket.on('muxRelayChunk', (payload) => {
+  const handleMuxRelayChunk = (payload) => {
     const eventId = payload?.eventId;
     const chunk = payload?.chunk;
     if (!muxRelay || !muxRelay.proc || muxRelay.eventId !== eventId) return;
@@ -333,9 +324,9 @@ io.on('connection', (socket) => {
     try {
       muxRelay.proc.stdin.write(buf);
     } catch {}
-  });
+  };
 
-  socket.on('muxRelayStop', (payload) => {
+  const handleMuxRelayStop = (payload) => {
     const eventId = payload?.eventId;
     if (!muxRelay || muxRelay.eventId !== eventId) return;
     try {
@@ -345,7 +336,23 @@ io.on('connection', (socket) => {
       muxRelay.proc.kill('SIGTERM');
     } catch {}
     muxRelay = null;
+  };
+
+  socket.on('joinUserRoom', (userId) => {
+    if (userId) {
+      socket.join(`user_${userId}`);
+      socket.data = socket.data || {};
+      socket.data.joinedUserId = userId;
+      console.log(`Socket ${socket.id} joined user room user_${userId}`);
+    }
   });
+
+  socket.on('muxRelayStart', handleMuxRelayStart);
+  socket.on('muxRelayChunk', handleMuxRelayChunk);
+  socket.on('muxRelayStop', handleMuxRelayStop);
+  socket.on('start-stream', handleMuxRelayStart);
+  socket.on('stream-data', handleMuxRelayChunk);
+  socket.on('stop-stream', handleMuxRelayStop);
 
   socket.on('disconnect', async () => {
     console.log('Cliente Socket.IO desconectado:', socket.id);
