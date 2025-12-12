@@ -44,6 +44,15 @@ const allowedOrigins = [
   'http://localhost:3000'
 ];
 
+const allowedHeaders = [
+  'Content-Type',
+  'Authorization',
+  'X-Requested-With',
+  'Cache-Control',
+  'Accept',
+  'Origin'
+];
+
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
@@ -51,7 +60,7 @@ app.use(cors({
     return callback(null, false);
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders,
   credentials: true
 }));
 
@@ -61,7 +70,7 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', origin);
   }
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.header('Access-Control-Allow-Headers', allowedHeaders.join(', '));
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -109,7 +118,7 @@ const io = new Server(server, {
       'http://localhost:3000'
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    allowedHeaders,
     credentials: true
   }
 });
