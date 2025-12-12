@@ -2,7 +2,12 @@ const User = require('../models/User');
 const { successResponse, errorResponse } = require('../utils/response');
 const { refreshYouTubeSubscribers } = require('../services/youtube.service');
 const cloudinaryService = require('../services/cloudinary.service');
+const NotificationService = require('../services/notification.service');
+const { NotificationTypes } = require('../constants/notificationTypes');
 const multer = require('multer');
+const AuditLog = require('../models/AuditLog');
+const speakeasy = require('speakeasy');
+const qrcode = require('qrcode');
 
 // Configurar multer para manejar la carga de archivos en memoria
 const upload = multer({
@@ -21,8 +26,8 @@ const upload = multer({
 const getProfile = async (req, res) => {
   try {
     // Seleccionamos los campos específicos que queremos devolver
-    const user = await User.findById(req.user.id)
-      .select('name email birthDate city province country userPhone shop avatar userType preferredAddress youtubeTokens sellerProfile influencerProfile')
+  const user = await User.findById(req.user.id)
+      .select('name email birthDate city province country userPhone shop avatar userType preferredAddress youtubeTokens sellerProfile influencerProfile followers preferences twoFactorEnabled')
       .populate('shop');
     if (!user) {
       return errorResponse(res, 'Usuario no encontrado', 404);
@@ -83,7 +88,7 @@ const updateAvatar = async (req, res) => {
 
 const updateProfile = async (req, res) => {
   try {
-    const { name, email, birthDate, city, province, country, userPhone, userType, preferredAddress, sellerProfile, influencerProfile } = req.body;
+    const { name, email, birthDate, city, province, country, userPhone, userType, preferredAddress, sellerProfile, influencerProfile, preferences, twoFactorEnabled } = req.body;
 
     // Verificar si el nuevo email ya está en uso
     if (email) {
@@ -109,6 +114,19 @@ const updateProfile = async (req, res) => {
     if (preferredAddress) user.preferredAddress = preferredAddress;
     if (sellerProfile) user.sellerProfile = sellerProfile;
     if (influencerProfile) user.influencerProfile = influencerProfile;
+    if (preferences && typeof preferences === 'object') {
+      const current = user.preferences || {};
+      user.preferences = {
+        ...current,
+        ...(typeof preferences.emailNotifications === 'boolean' ? { emailNotifications: preferences.emailNotifications } : {}),
+        ...(typeof preferences.inAppNotifications === 'boolean' ? { inAppNotifications: preferences.inAppNotifications } : {}),
+        ...(typeof preferences.language === 'string' ? { language: preferences.language } : {}),
+        ...(typeof preferences.timezone === 'string' ? { timezone: preferences.timezone } : {})
+      };
+    }
+    if (typeof twoFactorEnabled === 'boolean') {
+      user.twoFactorEnabled = twoFactorEnabled;
+    }
     if (userType && Array.isArray(userType)) {
       // Validar que todos los tipos sean válidos
       const validTypes = ['buyer', 'seller', 'influencer', 'admin'];
@@ -179,10 +197,270 @@ const deleteAccount = async (req, res) => {
   }
 };
 
+const followUser = async (req, res) => {
+  try {
+    const authUserId = req.user.id;
+    const { id: targetUserId } = req.params;
+
+    if (!targetUserId) {
+      return errorResponse(res, 'Usuario objetivo requerido', 400);
+    }
+
+    if (String(authUserId) === String(targetUserId)) {
+      return errorResponse(res, 'No puedes seguirte a ti mismo', 400);
+    }
+
+    const [authUser, targetUser] = await Promise.all([
+      User.findById(authUserId),
+      User.findById(targetUserId),
+    ]);
+
+    if (!authUser) {
+      return errorResponse(res, 'Usuario no encontrado', 404);
+    }
+    if (!targetUser) {
+      return errorResponse(res, 'Usuario objetivo no encontrado', 404);
+    }
+
+    const isFollowing = (authUser.followingUsers || []).some(u => String(u) === String(targetUserId));
+
+    if (isFollowing) {
+      authUser.followingUsers = (authUser.followingUsers || []).filter(u => String(u) !== String(targetUserId));
+      targetUser.followers = Math.max(0, Number(targetUser.followers || 0) - 1);
+    } else {
+      authUser.followingUsers = [ ...(authUser.followingUsers || []), targetUserId ];
+      targetUser.followers = Number(targetUser.followers || 0) + 1;
+    }
+
+    await Promise.all([authUser.save(), targetUser.save()]);
+
+    try {
+      if (!isFollowing) {
+        const io = req.app.get('io');
+        const followerName = authUser.name || authUser.fullName || authUser.email || 'Un usuario';
+        await NotificationService.emitAndPersist(io, {
+          users: [targetUserId],
+          type: NotificationTypes.FOLLOW,
+          title: 'Nuevo seguidor',
+          message: `${followerName} te comenzó a seguir`,
+          entity: authUser._id,
+          data: { followerId: authUser._id, followerName }
+        });
+        try {
+          if (io) {
+            io.to(`user_${targetUserId}`).emit('user:followersIncrement', { userId: targetUserId, amount: 1, followerName });
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    return successResponse(
+      res,
+      { followed: !isFollowing, followers: targetUser.followers },
+      isFollowing ? 'Dejaste de seguir al usuario' : 'Has comenzado a seguir al usuario'
+    );
+  } catch (err) {
+    console.error('Error en follow/unfollow user:', err);
+    return errorResponse(res, 'Error al procesar el seguimiento', 500, err.message);
+  }
+};
+
+// Resumen de usuarios para administración
+async function getAdminUsersSummary(req, res) {
+  try {
+    const [totalUsers, activatedUsers, sellers, influencers, admins] = await Promise.all([
+      User.countDocuments({}),
+      User.countDocuments({ isActivated: true }),
+      User.countDocuments({ userType: { $in: ['seller'] } }),
+      User.countDocuments({ userType: { $in: ['influencer'] } }),
+      User.countDocuments({ userType: { $in: ['admin'] } }),
+    ]);
+
+    return successResponse(
+      res,
+      { totalUsers, activatedUsers, sellers, influencers, admins },
+      'Resumen de usuarios'
+    );
+  } catch (err) {
+    return errorResponse(res, 'Error obteniendo resumen de usuarios', 500, err.message);
+  }
+}
+
+async function listAdminUsers(req, res) {
+  try {
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit || '20'), 10)));
+    const role = typeof req.query.role === 'string' ? req.query.role : undefined;
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+
+    const filter = {};
+    if (role) {
+      filter.userType = { $in: [role] };
+    }
+    if (status === 'activated') {
+      filter.isActivated = true;
+    } else if (status === 'deactivated') {
+      filter.isActivated = false;
+    }
+
+    const total = await User.countDocuments(filter);
+    const users = await User.find(filter)
+      .select('name fullName email avatar userType isActivated shop createdAt')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .populate('shop', 'name');
+
+    return successResponse(res, { total, page, limit, users }, 'Listado de usuarios');
+  } catch (err) {
+    return errorResponse(res, 'Error al listar usuarios', 500, err.message);
+  }
+}
+
+async function updateUserTypeAdmin(req, res) {
+  try {
+    const { id } = req.params;
+    const { userType } = req.body || {};
+    if (!Array.isArray(userType) || userType.length === 0) {
+      return errorResponse(res, 'userType debe ser un arreglo no vacío', 400);
+    }
+    const validTypes = ['buyer', 'seller', 'influencer', 'admin'];
+    const isValid = userType.every((t) => validTypes.includes(t));
+    if (!isValid) {
+      return errorResponse(res, 'Tipo de usuario inválido', 400);
+    }
+    const before = await User.findById(id).select('userType');
+    const user = await User.findByIdAndUpdate(
+      id,
+      { $set: { userType } },
+      { new: true }
+    ).select('name fullName email avatar userType isActivated');
+    if (!user) {
+      return errorResponse(res, 'Usuario no encontrado', 404);
+    }
+    try {
+      await AuditLog.create({
+        actor: req.user.id,
+        action: 'user.userType.update',
+        entityType: 'User',
+        entityId: user._id,
+        before: { userType: before?.userType },
+        after: { userType: user.userType },
+        metadata: { ip: req.ip }
+      });
+    } catch {}
+    return successResponse(res, { user }, 'Roles de usuario actualizados');
+  } catch (err) {
+    return errorResponse(res, 'Error actualizando roles de usuario', 500, err.message);
+  }
+}
+
+async function updateUserStatusAdmin(req, res) {
+  try {
+    const { id } = req.params;
+    const { isActivated } = req.body || {};
+    if (typeof isActivated !== 'boolean') {
+      return errorResponse(res, 'isActivated debe ser booleano', 400);
+    }
+    const before = await User.findById(id).select('isActivated');
+    const user = await User.findByIdAndUpdate(
+      id,
+      { $set: { isActivated } },
+      { new: true }
+    ).select('name fullName email avatar userType isActivated');
+    if (!user) {
+      return errorResponse(res, 'Usuario no encontrado', 404);
+    }
+    try {
+      await AuditLog.create({
+        actor: req.user.id,
+        action: 'user.isActivated.update',
+        entityType: 'User',
+        entityId: user._id,
+        before: { isActivated: before?.isActivated },
+        after: { isActivated: user.isActivated },
+        metadata: { ip: req.ip }
+      });
+    } catch {}
+    return successResponse(res, { user }, 'Estado de usuario actualizado');
+  } catch (err) {
+    return errorResponse(res, 'Error actualizando estado de usuario', 500, err.message);
+  }
+}
+
+const setupTwoFactor = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return errorResponse(res, 'Usuario no encontrado', 404);
+    }
+    const secret = speakeasy.generateSecret({ name: `MercadoTiendas (${user.email || user.name || 'usuario'})` });
+    user.twoFactorSecret = secret.base32;
+    user.twoFactorEnabled = false;
+    await user.save();
+    const otpauthUrl = secret.otpauth_url;
+    const qrDataUrl = await qrcode.toDataURL(otpauthUrl);
+    return successResponse(res, { otpauthUrl, qrDataUrl });
+  } catch (err) {
+    return errorResponse(res, 'Error al configurar 2FA', 500, err.message);
+  }
+};
+
+const verifyTwoFactor = async (req, res) => {
+  try {
+    const { token } = req.body;
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return errorResponse(res, 'Usuario no encontrado', 404);
+    }
+    if (!user.twoFactorSecret) {
+      return errorResponse(res, '2FA no configurado', 400);
+    }
+    const verified = speakeasy.totp.verify({
+      secret: user.twoFactorSecret,
+      encoding: 'base32',
+      token: String(token || ''),
+      window: 1
+    });
+    if (!verified) {
+      return errorResponse(res, 'Código inválido', 400);
+    }
+    user.twoFactorEnabled = true;
+    await user.save();
+    return successResponse(res, { enabled: true });
+  } catch (err) {
+    return errorResponse(res, 'Error al verificar 2FA', 500, err.message);
+  }
+};
+
+const disableTwoFactor = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return errorResponse(res, 'Usuario no encontrado', 404);
+    }
+    user.twoFactorEnabled = false;
+    user.twoFactorSecret = null;
+    await user.save();
+    return successResponse(res, { enabled: false });
+  } catch (err) {
+    return errorResponse(res, 'Error al desactivar 2FA', 500, err.message);
+  }
+};
+
 module.exports = {
   getProfile,
   updateProfile,
   updatePassword,
   deleteAccount,
-  updateAvatar
+  updateAvatar,
+  followUser,
+  getAdminUsersSummary
+  ,
+  listAdminUsers,
+  updateUserTypeAdmin,
+  updateUserStatusAdmin,
+  setupTwoFactor,
+  verifyTwoFactor,
+  disableTwoFactor
 };

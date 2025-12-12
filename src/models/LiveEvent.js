@@ -23,6 +23,10 @@ const liveEventSchema = new mongoose.Schema(
       enum: ['draft', 'published', 'live', 'finished'],
       default: 'draft',
     },
+    endedAt: {
+      type: Date,
+      default: null,
+    },
   products: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Product',
@@ -71,6 +75,36 @@ const liveEventSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    platform: {
+      type: String,
+      trim: true,
+      lowercase: true,
+    },
+    muxLiveStreamId: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    muxPlaybackId: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    muxStreamKey: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    muxAssetId: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    muxStatus: {
+      type: String,
+      trim: true,
+      default: null,
+    },
     slug: {
       type: String,
       unique: true,
@@ -84,7 +118,9 @@ const liveEventSchema = new mongoose.Schema(
 // Pre-save middleware for slug generation and updatedAt
 liveEventSchema.pre('save', function (next) {
   // Generate slug only if not present or title changed
-  if (!this.slug || this.isModified('title')) {
+  const hasTitle = typeof this.title === 'string' && this.title.trim() !== '';
+  const shouldGenerateSlug = hasTitle && (!this.slug || this.isModified('title'));
+  if (shouldGenerateSlug) {
     const baseSlug = slugify(this.title, { lower: true, strict: true });
     const uniqueSuffix = Date.now().toString(36);
     this.slug = `${baseSlug}-${uniqueSuffix}`;

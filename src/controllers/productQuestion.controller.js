@@ -37,9 +37,9 @@ exports.createQuestion = async (req, res) => {
           users: [product.shop.owner],
           type: NotificationTypes.QUESTION,
           title: 'Nueva pregunta sobre tu producto',
-          message: `Han realizado una pregunta sobre tu producto ${product.name}`,
+          message: `Han realizado una pregunta sobre tu producto ${(product.nombre || product.name || '')}`,
           entity: product._id,
-          data: { productName: product.name || '', questionText: newQuestion.question || '' },
+          data: { productName: (product.nombre || product.name || ''), questionText: newQuestion.question || '' },
         });
       }
     } catch (notifyErr) {
@@ -142,7 +142,7 @@ exports.answerQuestion = async (req, res) => {
           title: 'Tu pregunta ha sido respondida',
           message: 'El vendedor ha respondido tu pregunta sobre el producto.',
           entity: question.productId,
-          data: { productName: product.name || '', questionText: question.question || '' },
+          data: { productName: (product.nombre || product.name || ''), questionText: question.question || '' },
         });
       }
     } catch (notifyErr) {

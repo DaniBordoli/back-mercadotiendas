@@ -36,6 +36,17 @@ class CloudinaryService {
         }
     }
 
+    async uploadFile(fileBuffer, folder = 'claims', mime = 'application/octet-stream') {
+        try {
+            const base64 = `data:${mime};base64,${fileBuffer.toString('base64')}`;
+            const result = await cloudinary.uploader.upload(base64, { folder, resource_type: 'auto' });
+            return result.secure_url;
+        } catch (error) {
+            console.error('Error al subir archivo a Cloudinary:', error);
+            throw new Error('Error al subir el archivo');
+        }
+    }
+
     /**
      * Elimina una imagen de Cloudinary
      * @param {string} imageUrl - URL de la imagen a eliminar

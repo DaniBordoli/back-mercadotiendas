@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { createShop, getShop, updateShop, deleteShop, updateShopTemplate, getShopTemplate, getMyShop, updateShopLogo, getPublicShop, updateMobbexCredentials, checkShopNameAvailability, followShop } = require('../controllers/shop.controller');
+const { createShop, getShop, updateShop, deleteShop, updateShopTemplate, getShopTemplate, getMyShop, updateShopLogo, updateShopBanner, getPublicShop, updateMobbexCredentials, checkShopNameAvailability, followShop, getAdminShopsSummary, listAdminShops, updateShopStateAdmin } = require('../controllers/shop.controller');
 const { verifyToken } = require('../middlewares/auth');
+const requireAdmin = require('../middlewares/admin');
 
 // Ruta pública para obtener tienda por ID (sin autenticación)
 router.get('/public/:id', getPublicShop);
@@ -12,6 +13,17 @@ router.get('/check-name', checkShopNameAvailability);
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
 
+// Resumen de tiendas (admin)
+router.get('/admin/summary', requireAdmin, getAdminShopsSummary);
+
+// Administración de tiendas (admin)
+router.get('/admin', requireAdmin, listAdminShops);
+router.patch('/admin/:id/state', requireAdmin, updateShopStateAdmin);
+
+// Administración de tiendas
+router.get('/admin', requireAdmin, listAdminShops);
+router.patch('/admin/:id/state', requireAdmin, updateShopStateAdmin);
+
 // Obtener mi tienda
 router.get('/me', getMyShop);
 
@@ -19,8 +31,9 @@ router.put('/template', updateShopTemplate);
 
 router.get('/template', getShopTemplate);
 
-// Subir logo de la tienda
 router.put('/logo', updateShopLogo);
+router.put('/logo', updateShopLogo);
+router.put('/banner', updateShopBanner);
 
 // Crear tienda
 router.post('/', createShop);

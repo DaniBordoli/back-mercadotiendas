@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('../middlewares/auth');
+const requireAdmin = require('../middlewares/admin');
 const { validateRequest } = require('../middlewares/validate');
 
 const {
@@ -8,7 +9,15 @@ const {
   updateProfile,
   updatePassword,
   deleteAccount,
-  updateAvatar
+  updateAvatar,
+  followUser,
+  getAdminUsersSummary,
+  listAdminUsers,
+  updateUserTypeAdmin,
+  updateUserStatusAdmin,
+  setupTwoFactor,
+  verifyTwoFactor,
+  disableTwoFactor
 } = require('../controllers/user.controller');
 
 /**
@@ -60,5 +69,22 @@ router.put('/avatar',
   verifyToken,
   updateAvatar
 );
+
+router.post('/:id/follow',
+  verifyToken,
+  followUser
+);
+
+// Resumen de usuarios (admin)
+router.get('/admin/summary', verifyToken, requireAdmin, getAdminUsersSummary);
+
+// Administración de usuarios (admin)
+router.get('/admin', verifyToken, requireAdmin, listAdminUsers);
+router.patch('/admin/:id/userType', verifyToken, requireAdmin, updateUserTypeAdmin);
+router.patch('/admin/:id/status', verifyToken, requireAdmin, updateUserStatusAdmin);
+
+router.post('/2fa/setup', verifyToken, setupTwoFactor);
+router.post('/2fa/verify', verifyToken, validateRequest('verifyTwoFactor'), verifyTwoFactor);
+router.delete('/2fa', verifyToken, disableTwoFactor);
 
 module.exports = router;

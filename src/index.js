@@ -6,6 +6,8 @@ const fs = require('fs');
 const https = require('https');
 const path = require('path');
 const mongoose = require('mongoose');
+const ffmpeg = require('fluent-ffmpeg');
+const { PassThrough } = require('stream');
 const connectDB = require('./config/database');
 const routes = require('./routes');
 const { errorHandler, notFound } = require('./middlewares/error');
@@ -37,11 +39,43 @@ mongoose.connection.once('open', async () => {
   }
 });
 
-// Middlewares
-app.use(cors());
+const allowedOrigins = [
+  'https://mercadotiendas-pr-testing.onrender.com',
+  'http://localhost:3000'
+];
+
+const allowedHeaders = [
+  'Content-Type',
+  'Authorization',
+  'X-Requested-With',
+  'Cache-Control',
+  'Accept',
+  'Origin'
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(null, false);
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders,
+  credentials: true
+}));
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
+  res.header('Access-Control-Allow-Headers', allowedHeaders.join(', '));
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 app.use(morgan('dev'));
-// Aumentar el límite de tamaño de las peticiones JSON/URL-encoded para permitir payloads más grandes (por ejemplo, imágenes en base64)
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '10mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 
 // Configurar middleware para archivos estáticos
@@ -79,8 +113,13 @@ const server = app.listen(config.port, () => {
 const { Server } = require('socket.io');
 const io = new Server(server, {
   cors: {
-    origin: '*',
-    methods: ['GET', 'POST', 'PATCH']
+    origin: [
+      'https://mercadotiendas-pr-testing.onrender.com',
+      'http://localhost:3000'
+    ],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders,
+    credentials: true
   }
 });
 
@@ -93,22 +132,57 @@ app.set('io', io);
 io.on('connection', (socket) => {
   console.log('Cliente Socket.IO conectado:', socket.id);
 
+  let muxRelay = null;
+  let streamChunkCount = 0;
+
   // Permite que el cliente se una a una sala específica del evento si envía eventId
-  socket.on('joinEventRoom', async (eventId) => {
+  socket.on('joinEventRoom', async (payload) => {
+    const eventId = typeof payload === 'string' ? payload : payload?.eventId;
     if (eventId) {
       socket.join(`event_${eventId}`);
-      // Guardamos en la instancia del socket qué evento sigue este cliente
       socket.data = socket.data || {};
       socket.data.joinedEventId = eventId;
+      if (payload && typeof payload === 'object') {
+        if (payload.role) socket.data.role = payload.role;
+        if (payload.viewerId) socket.data.viewerId = payload.viewerId;
+      }
 
       try {
         // Cargar modelos de manera perezosa para evitar dependencias circulares
         const LiveEventMetrics = require('./models/LiveEventMetrics');
         const LiveEvent = require('./models/LiveEvent');
 
-        // Obtener tamaño actual de la sala (número de espectadores concurrentes)
         const room = io.sockets.adapter.rooms.get(`event_${eventId}`);
-        const currentViewers = room ? room.size : 1; // incluir al espectador actual
+        let currentViewers = 0;
+        if (room) {
+          for (const id of room) {
+            const s = io.sockets.sockets.get(id);
+            if (!s || s.data?.joinedEventId !== eventId) continue;
+            if (!s.data?.role || s.data.role === 'viewer') currentViewers++;
+          }
+        }
+
+        try {
+          io.to(`event_${eventId}`).emit('chat:userCount', { eventId, count: currentViewers });
+        } catch (_) {}
+
+        let isLive = false;
+        try {
+          const liveEvent = await LiveEvent.findById(eventId).select('startDateTime status updatedAt');
+          if (liveEvent) {
+            isLive = String(liveEvent.status) === 'live';
+          }
+        } catch {}
+        if (isLive) {
+          try {
+            const LiveEventViewerSnapshot = require('./models/LiveEventViewerSnapshot');
+            const ts = new Date();
+            await LiveEventViewerSnapshot.create({ event: eventId, viewersCount: currentViewers, timestamp: ts });
+            try {
+              io.to(`event_${eventId}`).emit('viewerCountUpdated', { eventId, viewersCount: currentViewers, timestamp: ts });
+            } catch {}
+          } catch (snapErr) {}
+        }
 
         // --- Cálculo de duración y promedio de concurrentes ---
         // Primero, calculamos durationSeconds actual basado en la hora de inicio del evento
@@ -133,7 +207,6 @@ io.on('connection', (socket) => {
         // Calcular nuevo promedio ponderado de espectadores concurrentes
         let newAvgConcurrent = prevAvg;
         if (durationForAvg > 0) {
-          // Formula: (prevAvg * prevDuration + currentViewers) / (prevDuration + 1)
           newAvgConcurrent = ((prevAvg * prevDuration) + currentViewers) / (prevDuration + 1);
         } else {
           newAvgConcurrent = currentViewers;
@@ -141,13 +214,12 @@ io.on('connection', (socket) => {
 
         // Construir objeto de actualización
         const update = {
-          $inc: { uniqueViewers: 1 },
           $max: { peakViewers: currentViewers },
           $set: {
-             avgConcurrentViewers: Math.round(newAvgConcurrent),
-             ...(durationForAvg !== undefined ? { durationSeconds: durationForAvg } : {})
-           }
-         };
+            avgConcurrentViewers: Math.round(newAvgConcurrent),
+            ...(durationForAvg !== undefined ? { durationSeconds: durationForAvg } : {})
+          }
+        };
 
         // Actualizar o crear métricas automáticamente
         const metrics = await LiveEventMetrics.findOneAndUpdate(
@@ -164,7 +236,14 @@ io.on('connection', (socket) => {
           const intervalId = setInterval(async () => {
             try {
               const roomNow = io.sockets.adapter.rooms.get(`event_${eventId}`);
-              const viewersNow = roomNow ? roomNow.size : 0;
+              let viewersNow = 0;
+              if (roomNow) {
+                for (const id of roomNow) {
+                  const s = io.sockets.sockets.get(id);
+                  if (!s || s.data?.joinedEventId !== eventId) continue;
+                  if (!s.data?.role || s.data.role === 'viewer') viewersNow++;
+                }
+              }
               const liveEvent = await LiveEvent.findById(eventId).select('startDateTime status updatedAt');
               if (!liveEvent || !liveEvent.startDateTime) return;
 
@@ -185,6 +264,15 @@ io.on('connection', (socket) => {
 
               io.to(`event_${eventId}`).emit('metricsUpdated', { eventId, metrics: updated });
 
+              if (String(liveEvent.status) === 'live') {
+                try {
+                  const LiveEventViewerSnapshot = require('./models/LiveEventViewerSnapshot');
+                  const ts2 = new Date();
+                  await LiveEventViewerSnapshot.create({ event: eventId, viewersCount: viewersNow, timestamp: ts2 });
+                  try { io.to(`event_${eventId}`).emit('viewerCountUpdated', { eventId, viewersCount: viewersNow, timestamp: ts2 }); } catch {}
+                } catch {}
+              }
+
               // Si el evento terminó, limpiamos intervalo
               if (liveEvent.status === 'finished') {
                 clearInterval(intervalId);
@@ -203,8 +291,136 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Permite que el cliente se una a su sala personal de usuario para recibir notificaciones en tiempo real
-  // El frontend debe emitir 'joinUserRoom' con el userId después de autenticarse
+  const handleMuxRelayStart = (payload) => {
+    const eventId = payload?.eventId;
+    const rtmpUrl = payload?.rtmpUrl || 'rtmp://global-live.mux.com:5222/app';
+    const streamKey = payload?.streamKey;
+    if (!eventId || !streamKey) return;
+
+    const maskedKey = typeof streamKey === 'string' && streamKey.length > 6
+      ? `${streamKey.slice(0, streamKey.length - 6)}******`
+      : '****';
+
+    console.log('Recibido start-stream', {
+      socketId: socket.id,
+      eventId,
+      streamKey: maskedKey
+    });
+
+    if (muxRelay && muxRelay.command) {
+      try {
+        if (muxRelay.input && !muxRelay.input.destroyed) {
+          muxRelay.input.end();
+        }
+        muxRelay.command.kill('SIGKILL');
+      } catch {}
+      muxRelay = null;
+    }
+
+    streamChunkCount = 0;
+    const finalUrl = `${rtmpUrl.replace(/\/+$/, '')}/${streamKey}`;
+    const inputStream = new PassThrough();
+
+    const command = ffmpeg()
+      .input(inputStream)
+      .inputFormat('webm')
+      .outputOptions('-threads 2')
+      .videoCodec('libx264')
+      .videoBitrate('2500k')
+      .addOption('-preset', 'veryfast')
+      .addOption('-tune', 'zerolatency')
+      .addOption('-maxrate', '2500k')
+      .addOption('-bufsize', '5000k')
+      .addOption('-r', '30')
+      .addOption('-g', '60')
+      .addOption('-keyint_min', '60')
+      .addOption('-sc_threshold', '0')
+      .addOption('-pix_fmt', 'yuv420p')
+      .audioCodec('aac')
+      .audioBitrate('128k')
+      .audioChannels(2)
+      .audioFrequency(48000)
+      .format('flv')
+      .output(finalUrl);
+
+    const room = `event_${eventId}`;
+
+    command.on('start', (cmdline) => {
+      console.log('FFmpeg start', { eventId, cmdline });
+      try {
+        io.to(room).emit('muxRelayState', { eventId, state: 'starting' });
+      } catch {}
+    });
+
+    command.on('stderr', (line) => {
+      console.error('FFmpeg stderr', { eventId, line });
+      try {
+        io.to(room).emit('muxRelayLog', { eventId, log: line });
+      } catch {}
+    });
+
+    command.on('error', (err, stdout, stderr) => {
+      console.error('FFmpeg error', { eventId, error: err.message, stdout, stderr });
+      try {
+        io.to(room).emit('muxRelayState', { eventId, state: 'error' });
+      } catch {}
+      muxRelay = null;
+    });
+
+    command.on('end', () => {
+      console.log('FFmpeg end', { eventId });
+      try {
+        io.to(room).emit('muxRelayState', { eventId, state: 'closed' });
+      } catch {}
+      muxRelay = null;
+    });
+
+    muxRelay = { eventId, command, input: inputStream };
+    socket.data = socket.data || {};
+    socket.data.ffmpegCommand = command;
+
+    command.run();
+  };
+
+  const handleMuxRelayChunk = (payload) => {
+    const eventId = payload?.eventId;
+    const raw = payload?.chunk ?? payload?.data;
+    if (!muxRelay || !muxRelay.input || muxRelay.eventId !== eventId) return;
+    streamChunkCount += 1;
+    if (streamChunkCount % 100 === 0) {
+      console.log('Recibiendo datos de video', {
+        socketId: socket.id,
+        eventId,
+        chunks: streamChunkCount
+      });
+    }
+    if (!raw) return;
+    let buf;
+    if (Buffer.isBuffer(raw)) buf = raw;
+    else if (raw instanceof ArrayBuffer) buf = Buffer.from(raw);
+    else buf = Buffer.from(raw);
+    try {
+      muxRelay.input.write(buf);
+    } catch {}
+  };
+
+  const handleMuxRelayStop = (payload) => {
+    const eventId = payload?.eventId;
+    if (!muxRelay || muxRelay.eventId !== eventId) return;
+    try {
+      if (muxRelay.input && !muxRelay.input.destroyed) {
+        muxRelay.input.end();
+      }
+      if (muxRelay.command) {
+        muxRelay.command.kill('SIGKILL');
+      }
+    } catch {}
+    muxRelay = null;
+    if (socket.data && socket.data.ffmpegCommand) {
+      socket.data.ffmpegCommand = null;
+    }
+  };
+
   socket.on('joinUserRoom', (userId) => {
     if (userId) {
       socket.join(`user_${userId}`);
@@ -214,24 +430,42 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('muxRelayStart', handleMuxRelayStart);
+  socket.on('muxRelayChunk', handleMuxRelayChunk);
+  socket.on('muxRelayStop', handleMuxRelayStop);
+  socket.on('start-stream', handleMuxRelayStart);
+  socket.on('stream-data', handleMuxRelayChunk);
+  socket.on('stop-stream', handleMuxRelayStop);
+  socket.on('end-stream', handleMuxRelayStop);
+
   socket.on('disconnect', async () => {
     console.log('Cliente Socket.IO desconectado:', socket.id);
+    if (muxRelay && muxRelay.command) {
+      try {
+        if (muxRelay.input && !muxRelay.input.destroyed) {
+          muxRelay.input.end();
+        }
+        muxRelay.command.kill('SIGKILL');
+      } catch {}
+      muxRelay = null;
+    }
     const eventId = socket.data?.joinedEventId;
     if (!eventId) return;
 
-    // Obtenemos la sala y el número actual de espectadores tras la desconexión
     const room = io.sockets.adapter.rooms.get(`event_${eventId}`);
     const currentViewers = room ? room.size : 0;
+    try {
+      io.to(`event_${eventId}`).emit('chat:userCount', { eventId, count: currentViewers });
+    } catch (_) {}
 
     try {
       const LiveEventMetrics = require('./models/LiveEventMetrics');
       const metricsDoc = await LiveEventMetrics.findOne({ event: eventId });
       if (!metricsDoc) return;
 
-      // Recalcular avgConcurrentViewers si hay duración disponible
       const prevAvg = metricsDoc.avgConcurrentViewers || 0;
       const prevDuration = metricsDoc.durationSeconds || 0;
-      const newDuration = prevDuration + 1; // sumamos 1 segundo al tiempo acumulado mínimo
+      const newDuration = prevDuration + 1;
       let newAvg = prevAvg;
       if (newDuration > 0) {
         newAvg = ((prevAvg * prevDuration) + currentViewers) / newDuration;
@@ -246,13 +480,11 @@ io.on('connection', (socket) => {
 
       await LiveEventMetrics.updateOne({ event: eventId }, update);
 
-      // Emitir actualización a la sala restante si quedan espectadores
       io.to(`event_${eventId}`).emit('metricsUpdated', {
         eventId,
         metrics: { ...metricsDoc.toObject(), ...update.$set }
       });
 
-      // Si ya no hay espectadores, limpiar intervalo de la sala
       if (currentViewers === 0 && eventIntervals.has(eventId)) {
         clearInterval(eventIntervals.get(eventId));
         eventIntervals.delete(eventId);

@@ -1,6 +1,9 @@
 const { Campaign, Shop, User } = require('../models');
+const NotificationService = require('../services/notification.service');
+const { NotificationTypes } = require('../constants/notificationTypes');
 const mongoose = require('mongoose');
 const { validationResult } = require('express-validator');
+const AuditLog = require('../models/AuditLog');
 
 /**
  * Obtener todas las campañas
@@ -427,5 +430,130 @@ exports.updateCampaignStatus = async (req, res) => {
       message: 'Error al actualizar el estado de la campaña',
       error: error.message
     });
+  }
+};
+
+// Resumen de campañas para administración
+exports.getAdminCampaignsSummary = async (req, res) => {
+  try {
+    const [totalCampaigns, activeCampaigns, draftCampaigns, closedCampaigns] = await Promise.all([
+      Campaign.countDocuments({}),
+      Campaign.countDocuments({ status: 'active' }),
+      Campaign.countDocuments({ status: 'draft' }),
+      Campaign.countDocuments({ status: 'closed' })
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: { totalCampaigns, activeCampaigns, draftCampaigns, closedCampaigns },
+      message: 'Resumen de campañas'
+    });
+  } catch (error) {
+    console.error('Error obteniendo resumen de campañas:', error);
+    return res.status(500).json({ success: false, message: 'Error obteniendo resumen de campañas', error: error.message });
+  }
+};
+
+// Listado de campañas para administración
+exports.listAdminCampaigns = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit || '20'), 10)));
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined; // active|draft|closed
+
+    const filter = {};
+    if (status) filter.status = status;
+
+    const total = await Campaign.countDocuments(filter);
+    const campaigns = await Campaign.find(filter)
+      .select('name status createdAt shop applicationsCount')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .populate('shop', 'name');
+
+    return res.status(200).json({ success: true, data: { total, page, limit, campaigns }, message: 'Listado de campañas' });
+  } catch (error) {
+    console.error('Error listando campañas (admin):', error);
+    return res.status(500).json({ success: false, message: 'Error listando campañas', error: error.message });
+  }
+};
+
+// Actualizar estado de campaña por administración
+exports.updateCampaignStateAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body || {};
+    const valid = ['active', 'draft', 'closed'];
+    if (!valid.includes(String(status))) {
+      return res.status(400).json({ success: false, message: 'Estado inválido de campaña' });
+    }
+    const before = await Campaign.findById(id).select('status');
+    const campaign = await Campaign.findByIdAndUpdate(
+      id,
+      { $set: { status } },
+      { new: true }
+    ).select('name status shop');
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: 'Campaña no encontrada' });
+    }
+    try {
+      await AuditLog.create({
+        actor: req.user.id,
+        action: 'campaign.status.update',
+        entityType: 'Campaign',
+        entityId: campaign._id,
+        before: { status: before?.status },
+        after: { status: campaign.status },
+        metadata: { ip: req.ip }
+      });
+    } catch {}
+    return res.status(200).json({ success: true, data: { campaign }, message: 'Estado de campaña actualizado' });
+  } catch (error) {
+    console.error('Error actualizando estado de campaña (admin):', error);
+    return res.status(500).json({ success: false, message: 'Error actualizando estado de campaña', error: error.message });
+  }
+};
+
+exports.inviteInfluencer = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { influencerId, message } = req.body || {};
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'ID de campaña inválido' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(influencerId)) {
+      return res.status(400).json({ success: false, message: 'ID de influencer inválido' });
+    }
+    const campaign = await Campaign.findById(id).populate('shop', 'name owner');
+    if (!campaign) return res.status(404).json({ success: false, message: 'Campaña no encontrada' });
+    if (campaign.status !== 'active') return res.status(400).json({ success: false, message: 'Solo se puede invitar a campañas activas' });
+
+    const user = await User.findById(req.user.id).populate('shop');
+    if (!user.shop || !campaign.shop || !campaign.shop._id.equals(user.shop._id)) {
+      return res.status(403).json({ success: false, message: 'No tienes permiso para invitar a esta campaña' });
+    }
+
+    try {
+      const io = req.app.get('io');
+      await NotificationService.emitAndPersist(io, {
+        users: [influencerId],
+        type: NotificationTypes.OFFER,
+        title: 'Invitación a campaña',
+        message: message || `Te invitaron a participar en la campaña ${campaign.name}`,
+        entity: campaign._id,
+        data: {
+          campaignId: String(campaign._id),
+          campaignName: campaign.name,
+          shopName: campaign.shop?.name || '',
+          influencerId: String(influencerId)
+        }
+      });
+    } catch (e) {}
+
+    return res.status(200).json({ success: true, message: 'Invitación enviada' });
+  } catch (error) {
+    console.error('Error invitando a campaña:', error);
+    return res.status(500).json({ success: false, message: 'Error invitando a campaña', error: error.message });
   }
 };

@@ -3,6 +3,7 @@ const router = express.Router();
 const { check, validationResult } = require('express-validator');
 const liveEventController = require('../controllers/liveEvent.controller');
 const { verifyToken } = require('../middlewares/auth');
+const requireAdmin = require('../middlewares/admin');
 const isInfluencer = require('../middlewares/isInfluencer');
 
 // GET /api/live-events - Obtener eventos
@@ -43,8 +44,20 @@ router.put('/:id',
   }
 );
 
-// GET /api/live-events/:id - Obtener un evento específico (influencer autenticado)
-router.get('/:id', verifyToken, isInfluencer, liveEventController.getLiveEvent);
+// Aggregated dashboard endpoints (declarar ANTES de rutas con ":id" para evitar colisiones)
+router.get('/summary', verifyToken, isInfluencer, liveEventController.getAggregatedSummary);
+router.get('/funnel', verifyToken, isInfluencer, liveEventController.getAggregatedFunnel);
+router.get('/audience-series', verifyToken, isInfluencer, liveEventController.getAggregatedAudienceSeries);
+// GET /api/live-events/campaign-summary - Resumen de ingresos por campaña
+router.get('/campaign-summary', verifyToken, isInfluencer, liveEventController.getCampaignSummary);
+
+// Resumen de eventos (admin)
+router.get('/admin/summary', verifyToken, requireAdmin, liveEventController.getAdminLiveEventsSummary);
+router.get('/admin', verifyToken, requireAdmin, liveEventController.listAdminLiveEvents);
+router.patch('/admin/:id/status', verifyToken, requireAdmin, liveEventController.updateLiveEventStateAdmin);
+
+// GET /api/live-events/:id - Obtener un evento específico (público con filtrado por estado)
+router.get('/:id', liveEventController.getLiveEvent);
 
 // GET /api/live-events/:id/metrics - Obtener métricas del evento (público)
 router.get('/:id/metrics', liveEventController.getMetrics);
@@ -55,18 +68,21 @@ router.get('/:id/product-metrics', liveEventController.getProductMetrics);
 // PATCH /api/live-events/:id/metrics - Actualizar métricas del evento (sin auth para permitir tracking)
 router.patch('/:id/metrics', liveEventController.updateMetrics);
 
+// Chat del evento
+router.get('/:id/chat', liveEventController.getChatMessages);
+router.post('/:id/chat', verifyToken, liveEventController.createChatMessage);
+router.delete('/:id/chat/:messageId', verifyToken, liveEventController.deleteChatMessage);
+
 // POST /api/live-events/:id/viewers-snapshot - Registrar snapshot de espectadores (sin auth para tracking)
 router.post('/:id/viewers-snapshot', liveEventController.createViewerSnapshot);
 
 // GET /api/live-events/:id/viewer-series - Obtener serie de espectadores
 router.get('/:id/viewer-series', liveEventController.getViewerSeries);
 
-// Aggregated dashboard endpoints
-router.get('/summary', verifyToken, isInfluencer, liveEventController.getAggregatedSummary);
-router.get('/funnel', verifyToken, isInfluencer, liveEventController.getAggregatedFunnel);
-router.get('/audience-series', verifyToken, isInfluencer, liveEventController.getAggregatedAudienceSeries);
-// GET /api/live-events/campaign-summary - Resumen de ingresos por campaña
-router.get('/campaign-summary', verifyToken, isInfluencer, liveEventController.getCampaignSummary);
+// POST /api/live-events/:id/mux/setup - Crear Live Stream en Mux y devolver ingest
+router.post('/:id/mux/setup', verifyToken, isInfluencer, liveEventController.setupMuxLive);
+// POST /api/live-events/:id/mux/relay - Iniciar relay HTTP -> RTMP hacia Mux (owner autenticado)
+router.post('/:id/mux/relay', verifyToken, liveEventController.startMuxRelay);
 
 // POST /api/live-events - Crear un nuevo evento en vivo (influencer autenticado)
 router.post('/',

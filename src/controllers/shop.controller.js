@@ -3,6 +3,7 @@ const User = require('../models/User');
 const { successResponse, errorResponse } = require('../utils/response');
 const cloudinaryService = require('../services/cloudinary.service');
 const multer = require('multer');
+const AuditLog = require('../models/AuditLog');
 
 // Configurar multer para manejar la carga de archivos en memoria
 const upload = multer({
@@ -283,6 +284,38 @@ exports.updateShop = async (req, res) => {
     const updates = req.body;
     const userId = req.user.id;
 
+    if (typeof updates.categories === 'string') {
+      try {
+        updates.categories = JSON.parse(updates.categories);
+      } catch (e) {
+        updates.categories = [];
+      }
+    }
+    if (Array.isArray(updates.categories)) {
+      updates.categories = updates.categories.map((c) => {
+        if (typeof c === 'object' && c !== null) {
+          return c.id || c._id || c;
+        }
+        return c;
+      });
+    }
+
+    if (typeof updates.subcategories === 'string') {
+      try {
+        updates.subcategories = JSON.parse(updates.subcategories);
+      } catch (e) {
+        updates.subcategories = [];
+      }
+    }
+    if (Array.isArray(updates.subcategories)) {
+      updates.subcategories = updates.subcategories.map((s) => {
+        if (typeof s === 'object' && s !== null) {
+          return s.id || s._id || s;
+        }
+        return s;
+      });
+    }
+
     const shop = await Shop.findById(id);
     if (!shop) {
       return errorResponse(res, 'Tienda no encontrada', 404);
@@ -550,6 +583,54 @@ exports.updateShopLogo = async (req, res) => {
   });
 };
 
+exports.updateShopBanner = async (req, res) => {
+  upload(req, res, async (err) => {
+    if (err instanceof multer.MulterError) {
+      return errorResponse(res, 'Error al subir el archivo: ' + err.message, 400);
+    } else if (err) {
+      return errorResponse(res, 'Error al procesar el archivo: ' + err.message, 400);
+    }
+
+    try {
+      const userId = req.user.id;
+
+      if (!req.file) {
+        return errorResponse(res, 'No se encontró archivo de imagen', 400);
+      }
+
+      const user = await User.findById(userId).populate('shop');
+      if (!user || !user.shop) {
+        return errorResponse(res, 'Tienda no encontrada', 404);
+      }
+
+      const shop = user.shop;
+
+      try {
+        const uploadResult = await cloudinaryService.uploadImage(req.file.buffer, 'shop-banners');
+
+        if (!shop.templateUpdate || typeof shop.templateUpdate !== 'object') {
+          shop.templateUpdate = {};
+        }
+        shop.templateUpdate.placeholderHeroImage = uploadResult;
+        await shop.save();
+
+        return successResponse(res, {
+          message: 'Banner actualizado exitosamente',
+          bannerUrl: uploadResult
+        });
+
+      } catch (uploadError) {
+        console.error('Error al subir imagen a Cloudinary:', uploadError);
+        return errorResponse(res, 'Error al procesar la imagen', 500);
+      }
+
+    } catch (err) {
+      console.error('Error al actualizar banner:', err);
+      return errorResponse(res, 'Error interno al actualizar banner', 500);
+    }
+  });
+};
+
 exports.getShopTemplate = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -594,7 +675,7 @@ exports.getShopTemplate = async (req, res) => {
 exports.updateMobbexCredentials = async (req, res) => {
   try {
     const { id } = req.params;
-    const { mobbexApiKey, mobbexAccessToken } = req.body;
+    const { mobbexApiKey, mobbexAccessToken, mobbexTaxId } = req.body;
 
     if (!mobbexApiKey || !mobbexAccessToken) {
       return errorResponse(res, 'Faltan credenciales de Mobbex', 400);
@@ -612,6 +693,9 @@ exports.updateMobbexCredentials = async (req, res) => {
 
     shop.mobbexApiKey = mobbexApiKey;
     shop.mobbexAccessToken = mobbexAccessToken;
+    if (typeof mobbexTaxId === 'string') {
+      shop.mobbexTaxId = mobbexTaxId;
+    }
     await shop.save();
 
     return successResponse(res, { message: 'Credenciales de Mobbex actualizadas correctamente' });
@@ -685,5 +769,86 @@ exports.followShop = async (req, res) => {
   } catch (err) {
     console.error('Error en follow/unfollow shop:', err);
     return errorResponse(res, 'Error al procesar la solicitud de seguimiento', 500);
+  }
+};
+
+// Resumen de tiendas para administración
+exports.getAdminShopsSummary = async (req, res) => {
+  try {
+    const [totalShops, activeShops] = await Promise.all([
+      Shop.countDocuments({}),
+      Shop.countDocuments({ active: true })
+    ]);
+
+    return successResponse(res, { totalShops, activeShops }, 'Resumen de tiendas');
+  } catch (err) {
+    return errorResponse(res, 'Error obteniendo resumen de tiendas', 500, err.message);
+  }
+};
+
+// Listado de tiendas para administración con paginación y filtros
+exports.listAdminShops = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit || '20'), 10)));
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined; // active|inactive
+    const ownerEmail = typeof req.query.ownerEmail === 'string' ? req.query.ownerEmail : undefined;
+
+    const filter = {};
+    if (status === 'active') filter.active = true;
+    else if (status === 'inactive') filter.active = false;
+
+    if (ownerEmail) {
+      const owners = await User.find({ email: ownerEmail }).select('_id').lean();
+      const ownerIds = owners.map(o => o._id);
+      if (ownerIds.length) filter.owner = { $in: ownerIds };
+      else filter.owner = { $in: [] }; // fuerza cero resultados
+    }
+
+    const total = await Shop.countDocuments(filter);
+    const shops = await Shop.find(filter)
+      .select('name subdomain active owner createdAt')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .populate('owner', 'name fullName email');
+
+    return successResponse(res, { total, page, limit, shops }, 'Listado de tiendas');
+  } catch (err) {
+    return errorResponse(res, 'Error al listar tiendas', 500, err.message);
+  }
+};
+
+// Actualizar estado (activo/inactivo) de tienda por administración
+exports.updateShopStateAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { active } = req.body || {};
+    if (typeof active !== 'boolean') {
+      return errorResponse(res, 'active debe ser booleano', 400);
+    }
+    const before = await Shop.findById(id).select('active');
+    const shop = await Shop.findByIdAndUpdate(
+      id,
+      { $set: { active } },
+      { new: true }
+    ).select('name subdomain active owner');
+    if (!shop) {
+      return errorResponse(res, 'Tienda no encontrada', 404);
+    }
+    try {
+      await AuditLog.create({
+        actor: req.user.id,
+        action: 'shop.active.update',
+        entityType: 'Shop',
+        entityId: shop._id,
+        before: { active: before?.active },
+        after: { active: shop.active },
+        metadata: { ip: req.ip }
+      });
+    } catch {}
+    return successResponse(res, { shop }, 'Estado de tienda actualizado');
+  } catch (err) {
+    return errorResponse(res, 'Error actualizando estado de tienda', 500, err.message);
   }
 };

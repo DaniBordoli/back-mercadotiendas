@@ -15,6 +15,7 @@ const currencyRoutes = require('./currency.routes');
 const shopInstitutionalRoutes = require('./shopInstitutional.routes');
 const campaignRoutes = require('./campaign.routes');
 const liveEventRoutes = require('./liveEvent.routes');
+const liveEventController = require('../controllers/liveEvent.controller');
 const productQuestionRoutes = require('./productQuestion.routes');
 const productReviewRoutes = require('./productReview.routes');
 const campaignApplicationRoutes = require('./campaignApplication.routes');
@@ -25,6 +26,12 @@ const supportRoutes = require('./support.routes');
 const influencerRoutes = require('./influencer');
 const tiktokAuthRoutes = require('./tiktok.routes');
 const youtubeAuthRoutes = require('./youtube.routes');
+const claimsRoutes = require('./claims.routes');
+const disputeRoutes = require('./dispute.routes');
+const contactMessageRoutes = require('./contactMessage.routes');
+const favoritesRoutes = require('./favorites.routes');
+const auditRoutes = require('./audit.routes');
+const adminRoutes = require('./admin.routes');
 
 // Rutas de autenticación (/api/auth/*)
 router.use('/auth', authRoutes);
@@ -84,6 +91,7 @@ router.use('/shop-institutional', shopInstitutionalRoutes);
 // Rutas de campañas (/api/campaigns/*)
 router.use('/campaigns', campaignRoutes);
 router.use('/live-events', liveEventRoutes);
+router.post('/mux/webhook', liveEventController.handleMuxWebhook);
 
 // Rutas de aplicaciones a campañas (/api/applications/*)
 router.use('/applications', campaignApplicationRoutes);
@@ -96,6 +104,12 @@ router.use('/uploads', uploadRoutes);
 
 // Rutas de soporte (/api/support/*)
 router.use('/support', supportRoutes);
+router.use('/claims', claimsRoutes);
+router.use('/disputes', disputeRoutes);
+router.use('/contact-messages', contactMessageRoutes);
+router.use('/favorites', favoritesRoutes);
+router.use('/audit', auditRoutes);
+router.use('/admin', adminRoutes);
 
 // Rutas de influencer (/api/users/* y /api/admin/influencer/*)
 router.use('/', influencerRoutes);

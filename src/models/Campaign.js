@@ -63,6 +63,7 @@ const campaignSchema = new mongoose.Schema({
       description: { type: String, required: false },
       date: { type: Date, required: false },
       kpiKey: { type: String, required: false },
+      completedAt: { type: Date, required: false },
     },
   ],
   kpis: {

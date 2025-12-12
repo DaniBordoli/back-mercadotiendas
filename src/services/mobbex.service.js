@@ -5,6 +5,54 @@
 
 const { mobbex } = require('mobbex');
 const mobbexConfig = require('../config/mobbex');
+const crypto = require('crypto');
+const axios = require('axios');
+
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+const classifyMobbexError = (error) => {
+  const status = error?.response?.status;
+  const code = error?.code;
+  const message = String(error?.message || '');
+  if (message.includes('timeout') || code === 'ETIMEDOUT') return 'timeout';
+  if (code === 'ENOTFOUND' || code === 'ECONNRESET' || code === 'ECONNABORTED' || code === 'EAI_AGAIN') return 'network';
+  if (status === 401 || status === 403) return 'auth';
+  if (status === 429) return 'rate_limit';
+  if (status >= 500) return 'server';
+  if (status >= 400) return 'validation';
+  if (message.includes('Must set Api Key') || message.includes('Expecting two arguments')) return 'validation';
+  return 'unknown';
+};
+
+const shouldRetry = (error) => {
+  const type = classifyMobbexError(error);
+  return type === 'timeout' || type === 'network' || type === 'server' || type === 'rate_limit';
+};
+
+const withRetry = async (operationFn, { retries = 2, baseDelayMs = 300, timeoutMs = 8000 } = {}) => {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const opPromise = operationFn();
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })), timeoutMs));
+      const result = await Promise.race([opPromise, timeoutPromise]);
+      return result;
+    } catch (err) {
+      lastError = err;
+      if (attempt < retries && shouldRetry(err)) {
+        const wait = baseDelayMs * Math.pow(2, attempt);
+        await delay(wait);
+        continue;
+      }
+      const type = classifyMobbexError(err);
+      const wrapped = new Error(`Error (${type}) al llamar a Mobbex: ${err.message}`);
+      wrapped.type = type;
+      wrapped.original = err;
+      throw wrapped;
+    }
+  }
+  throw lastError;
+};
 
 // Inicializar SDK de Mobbex con credenciales
 mobbex.configurations.configure({
@@ -12,6 +60,18 @@ mobbex.configurations.configure({
   accessToken: mobbexConfig.accessToken,
   auditKey: mobbexConfig.auditKey
 });
+
+const isPublicUrl = (urlStr) => {
+  try {
+    const u = new URL(urlStr);
+    const host = (u.hostname || '').toLowerCase();
+    const isLocalHost = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+    const isHttp = u.protocol === 'http:' || u.protocol === 'https:';
+    return isHttp && !isLocalHost;
+  } catch {
+    return false;
+  }
+};
 
 /**
  * Crea un checkout en Mobbex
@@ -21,7 +81,7 @@ mobbex.configurations.configure({
  * @param {Object} credentials - Credenciales de Mobbex (opcional)
  * @returns {Promise<Object>} - Datos del checkout creado
  */
-const createCheckout = async (orderData, customerData, items, credentials = {}) => {
+const createCheckout = async (orderData, customerData, items, credentials = {}, options = {}) => {
   try {
     console.log('=== MOBBEX SERVICE: Iniciando createCheckout ===');
     console.log('orderData recibido:', JSON.stringify(orderData, null, 2));
@@ -43,20 +103,28 @@ const createCheckout = async (orderData, customerData, items, credentials = {}) 
       });
     }
 
-    // Preparar datos para Mobbex
+    const frontendBase = process.env.FRONTEND_URL || mobbexConfig.returnUrl || 'http://localhost:3000';
+    const backendBase = process.env.BACKEND_URL || '';
+    const computedReturnUrl = `${String(frontendBase).replace(/\/+$/, '')}/mobbex-return-bridge.html`;
+    const computedWebhookUrl = (process.env.NODE_ENV === 'production' && isPublicUrl(backendBase))
+      ? `${String(backendBase).replace(/\/+$/, '')}/api/payments/webhook`
+      : undefined;
+
+    if (process.env.NODE_ENV === 'production' && !isPublicUrl(frontendBase)) {
+      console.warn('MOBBEX SERVICE: FRONTEND_URL no es público en producción, return_url puede fallar:', frontendBase);
+    }
+    if (process.env.NODE_ENV === 'production' && computedWebhookUrl === undefined) {
+      console.warn('MOBBEX SERVICE: BACKEND_URL no es público en producción, webhook no será enviado');
+    }
+
     const checkoutData = {
       total: orderData.total,
       currency: 'ARS',
       description: orderData.description,
       reference: orderData.reference,
       test: process.env.NODE_ENV !== 'production',
-      return_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/mobbex-return-bridge.html`,
-      // Webhook temporal para desarrollo - Mobbex requiere URL pública válida
-      // En desarrollo usamos una URL de prueba o removemos el webhook
-      ...(process.env.NODE_ENV === 'production' && process.env.BACKEND_URL && !process.env.BACKEND_URL.includes('localhost') 
-        ? { webhook: `${process.env.BACKEND_URL}/api/payments/webhook` }
-        : {}
-      ),
+      return_url: computedReturnUrl,
+      ...(computedWebhookUrl ? { webhook: computedWebhookUrl } : {}),
       customer: {
         email: customerData.email,
         name: customerData.name,
@@ -83,7 +151,16 @@ const createCheckout = async (orderData, customerData, items, credentials = {}) 
 
     // Crear checkout en Mobbex
     console.log('=== MOBBEX SERVICE: Enviando request a Mobbex API ===');
-    const response = await mobbex.checkout.create(checkoutData);
+    const payload = options && Array.isArray(options.split) && options.split.length > 0
+      ? { ...checkoutData, split: options.split }
+      : checkoutData;
+    const response = await withRetry(
+      () => (options && Array.isArray(options.split) && options.split.length > 0
+        ? mobbex.checkout.split(payload)
+        : mobbex.checkout.create(payload)
+      ),
+      { retries: 2, baseDelayMs: 400, timeoutMs: 8000 }
+    );
     
     console.log('=== MOBBEX SERVICE: Respuesta cruda de Mobbex ===');
     console.log('response completo:', JSON.stringify(response, null, 2));
@@ -140,24 +217,41 @@ const checkPaymentStatus = async (id) => {
       throw new Error('El ID de la operación es requerido');
     }
 
-    // Consultar estado en Mobbex usando el módulo transactions
-    // Nota: El SDK de Mobbex no tiene un método directo para consultar una operación por ID
-    // Por lo que devolvemos información básica y simulamos una respuesta exitosa para pruebas
-    
-    // En un entorno de producción, se debería implementar una consulta real
-    // utilizando el endpoint adecuado de la API de Mobbex
-    
+    const searchResult = await withRetry(() => mobbex.transactions.search({ text: id, limit: 1 }, 'get'), { retries: 2, baseDelayMs: 300, timeoutMs: 5000 });
+
+    const operation = Array.isArray(searchResult)
+      ? searchResult[0]
+      : (searchResult?.operations?.[0] || searchResult?.data?.operations?.[0] || searchResult?.data?.[0] || searchResult);
+
+    if (!operation) {
+      return {
+        id,
+        status: { code: '404', text: 'Operación no encontrada' },
+        paymentMethod: null,
+        amount: 0,
+        currency: 'ARS',
+        createdAt: new Date().toISOString(),
+        reference: null,
+      };
+    }
+
+    const child = Array.isArray(operation.childs) && operation.childs.length
+      ? (operation.childs.find(c => String(c.operation || '').includes('payment')) || operation.childs[operation.childs.length - 1])
+      : null;
+
+    const src = child || operation;
+
     const paymentInfo = {
-      id: id,
+      id: String(src.id || operation.id || id),
       status: {
-        code: '200',
-        text: 'Pendiente de pago'
+        code: String((src.status && src.status.code) || src.status || '200'),
+        text: String((src.status && src.status.text) || 'Estado consultado')
       },
-      paymentMethod: 'Método de prueba',
-      amount: 0,
-      currency: 'ARS',
-      createdAt: new Date().toISOString(),
-      reference: `ref_${id}`
+      paymentMethod: (src.payment_method && src.payment_method.name) || (src.source && src.source.name) || null,
+      amount: Number(src.total || src.amount || 0),
+      currency: String(src.currency || operation.currency || 'ARS'),
+      createdAt: String(src.created || src.updated || new Date().toISOString()),
+      reference: String(src.reference || operation.reference || '')
     };
 
     return paymentInfo;
@@ -180,10 +274,13 @@ const processWebhook = (webhookData) => {
 
     const data = webhookData.data;
 
-    // Verificar firma del webhook si hay auditKey configurada
-    if (mobbexConfig.auditKey) {
-      // Aquí iría la lógica de verificación de firma
-      // Ejemplo: verificar webhookData.signature con auditKey
+    if (mobbexConfig.auditKey && (webhookData.signature || (webhookData.headers && webhookData.headers['x-signature']))) {
+      const signature = webhookData.signature || (webhookData.headers ? webhookData.headers['x-signature'] : null);
+      const payload = webhookData.raw || JSON.stringify(webhookData);
+      const expected = crypto.createHmac('sha256', mobbexConfig.auditKey).update(payload).digest('hex');
+      if (signature !== expected) {
+        throw new Error('Firma de webhook inválida');
+      }
     }
 
     // Extraer información relevante

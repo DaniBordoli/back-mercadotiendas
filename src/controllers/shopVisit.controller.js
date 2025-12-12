@@ -85,3 +85,41 @@ exports.getVisitsLast24h = async (req, res) => {
     return errorResponse(res, 'Error al obtener las visitas de las últimas 24 horas', 500, error.message);
   }
 };
+
+/**
+ * Obtiene el total de visitas de "hoy" y "ayer" para la tienda del usuario autenticado
+ * Hoy: desde 00:00:00 hasta ahora
+ * Ayer: día calendario anterior completo
+ */
+exports.getVisitsDayStats = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user || !user.shop) {
+      return errorResponse(res, 'El usuario no tiene una tienda asociada', 400);
+    }
+
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const startOfYesterday = new Date(startOfToday.getTime() - 24 * 60 * 60 * 1000);
+    const endOfYesterday = new Date(startOfToday.getTime() - 1);
+
+    const [todayAgg, yesterdayAgg] = await Promise.all([
+      ShopVisit.aggregate([
+        { $match: { shop: user.shop, visitedAt: { $gte: startOfToday, $lte: now } } },
+        { $count: 'total' }
+      ]),
+      ShopVisit.aggregate([
+        { $match: { shop: user.shop, visitedAt: { $gte: startOfYesterday, $lte: endOfYesterday } } },
+        { $count: 'total' }
+      ])
+    ]);
+
+    const today = todayAgg.length > 0 ? todayAgg[0].total : 0;
+    const yesterday = yesterdayAgg.length > 0 ? yesterdayAgg[0].total : 0;
+
+    return successResponse(res, { today, yesterday }, 'Visitas de hoy y ayer obtenidas exitosamente');
+  } catch (error) {
+    console.error('Error al obtener visitas de hoy/ayer:', error);
+    return errorResponse(res, 'Error al obtener visitas de hoy/ayer', 500, error.message);
+  }
+};

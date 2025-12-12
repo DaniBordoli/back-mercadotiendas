@@ -110,6 +110,10 @@ const shopSchema = new mongoose.Schema({
   mobbexAccessToken: {
     type: String,
     default: null
+  },
+  mobbexTaxId: {
+    type: String,
+    default: null
   }
 });
 

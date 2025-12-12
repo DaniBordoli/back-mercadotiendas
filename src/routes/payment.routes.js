@@ -6,6 +6,7 @@ const {
   getPaymentStatus,
   handleWebhook,
   getUserPayments,
+  getSellerPayments,
   getMobbexConnectUrl,
   getMobbexCredentials,
   completeMockPayment
@@ -31,6 +32,13 @@ router.get('/status/:id', verifyToken, getPaymentStatus);
  * @access Private
  */
 router.get('/history', verifyToken, getUserPayments);
+
+/**
+ * @route GET /api/payments/seller/history
+ * @desc Obtener historial de pagos de la tienda del usuario autenticado (vendedor)
+ * @access Private
+ */
+router.get('/seller/history', verifyToken, getSellerPayments);
 
 /**
  * @route POST /api/payments/mobbex-connect-url

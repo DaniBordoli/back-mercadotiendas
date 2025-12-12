@@ -9,6 +9,8 @@ const NotificationTypes = {
   PAYMENT: 'payment',
   PRODUCT_REVIEW: 'product_review',
   QUESTION: 'question',
+  CLAIM: 'claim',
+  DISPUTE: 'dispute',
 
   // Campañas e Influencers
   CAMPAIGN: 'campaign',
@@ -22,7 +24,9 @@ const NotificationTypes = {
   LIVE_METRICS: 'live_metrics',
 
   // Sistema
-  SYSTEM: 'system'
+  SYSTEM: 'system',
+  FOLLOW: 'follow',
+  CONTACT_MESSAGE: 'contact_message'
 };
 
 module.exports = { NotificationTypes };

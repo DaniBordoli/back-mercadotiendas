@@ -80,6 +80,15 @@ const validationRules = {
     body('items.*.name')
       .notEmpty().withMessage('El nombre del item es requerido')
       .isString().withMessage('El nombre del item debe ser un texto'),
+    body('items.*.productId')
+      .notEmpty().withMessage('El ID de producto es requerido')
+      .custom((value) => {
+        const base = String(value || '').split('::')[0];
+        if (!/^[0-9a-fA-F]{24}$/.test(base)) {
+          throw new Error('ID de producto inválido');
+        }
+        return true;
+      }),
     body('items.*.price')
       .notEmpty().withMessage('El precio del item es requerido')
       .isNumeric().withMessage('El precio debe ser un número')
@@ -152,6 +161,14 @@ const validationRules = {
         }
         return true;
       })
+  ],
+
+  verifyTwoFactor: [
+    body('token')
+      .trim()
+      .notEmpty().withMessage('El código es requerido')
+      .isLength({ min: 6, max: 6 }).withMessage('El código debe tener 6 dígitos')
+      .isNumeric().withMessage('El código debe contener solo números')
   ],
 
   resetPassword: [

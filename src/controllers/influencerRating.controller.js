@@ -26,7 +26,7 @@ exports.isRateable = async (req, res) => {
     }
 
     // Existe aplicación aceptada?
-    const application = await CampaignApplication.findOne({ campaign: campaignId, user: influencerId, status: 'accepted' });
+    const application = await CampaignApplication.findOne({ campaign: campaignId, user: influencerId, status: { $in: ['accepted', 'completed'] } });
     if (!application) return successResponse(res, { isRateable: false });
 
     // Al menos un hito aprobado

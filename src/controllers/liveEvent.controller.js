@@ -1,6 +1,8 @@
 const { validationResult } = require('express-validator');
+const crypto = require('crypto');
 const mongoose = require('mongoose');
-const { LiveEvent, User, LiveEventMetrics, LiveEventProductMetrics } = require('../models');
+const { LiveEvent, User, LiveEventMetrics, LiveEventProductMetrics, AuditLog } = require('../models');
+const { ChatMessage } = require('../models');
 const NotificationService = require('../services/notification.service');
 const { NotificationTypes } = require('../constants/notificationTypes');
 const LiveEventViewerSnapshot = require('../models/LiveEventViewerSnapshot');
@@ -18,20 +20,32 @@ exports.createLiveEvent = async (req, res) => {
     }
 
     // In createLiveEvent, after destructuring req.body
-    const { title, description, date, time, status, products = [], socialAccounts = [], youtubeVideoId, campaign } = req.body;
+    const { title, description, date, time, status, products = [], socialAccounts = [], youtubeVideoId, campaign, platform } = req.body;
 
-    // Combinar fecha y hora en un solo Date ISO
-    const startDateTime = new Date(`${date}T${time}:00Z`);
+    let startDateTime;
+    try {
+      const tzOffsetMinutes = Number(req.body.tzOffsetMinutes ?? NaN);
+      if (!Number.isNaN(tzOffsetMinutes)) {
+        const [y, m, d] = String(date).split('-').map((v) => parseInt(v));
+        const [hh, mm] = String(time).split(':').map((v) => parseInt(v));
+        const utcMs = Date.UTC(y, m - 1, d, hh, mm, 0);
+        startDateTime = new Date(utcMs + tzOffsetMinutes * 60000);
+      } else {
+        startDateTime = new Date(`${date}T${time}:00`);
+      }
+    } catch (_) {
+      startDateTime = new Date(`${date}T${time}:00`);
+    }
 
     // Validar que la fecha no esté en el pasado
     if (startDateTime < new Date()) {
       return res.status(400).json({ success: false, message: 'La fecha y hora no pueden estar en el pasado' });
     }
 
-        // Asegurarse de que el usuario autenticado tiene el tipo "influencer" (el middleware debería manejarlo, pero se verifica por seguridad)
     const user = await User.findById(req.user._id);
-    if (!user || !user.userType?.includes('influencer')) {
-      return res.status(403).json({ success: false, message: 'Solo los influencers pueden crear eventos en vivo' });
+    const types = Array.isArray(user?.userType) ? user.userType.map(t => String(t).toLowerCase()) : [];
+    if (!user || !(types.includes('influencer') || types.includes('seller') || types.includes('vendedor'))) {
+      return res.status(403).json({ success: false, message: 'Solo influencers o vendedores pueden crear eventos en vivo' });
     }
 
     const liveEvent = new LiveEvent({
@@ -44,6 +58,7 @@ exports.createLiveEvent = async (req, res) => {
       socialAccounts,
       campaign,
       youtubeVideoId,
+      platform,
     });
 
     await liveEvent.save();
@@ -57,6 +72,184 @@ exports.createLiveEvent = async (req, res) => {
   } catch (error) {
     console.error('Error al crear evento en vivo:', error);
     res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+  }
+};
+
+exports.setupMuxLive = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const isValidObjectId = mongoose.Types.ObjectId.isValid(id);
+    const eventQuery = isValidObjectId ? { _id: id } : { slug: id };
+    eventQuery.owner = req.user._id;
+    const event = await LiveEvent.findOne(eventQuery);
+    if (!event) {
+      return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+    }
+    const forceNew = String(req.query.force || '').toLowerCase() === 'true';
+    const hasCreds = !!(process.env.MUX_TOKEN_ID && process.env.MUX_TOKEN_SECRET);
+    const hasSigning = !!(process.env.MUX_SIGNING_KEY_ID && process.env.MUX_SIGNING_KEY_SECRET);
+    if (!hasSigning) {
+      return res.status(500).json({ success: false, message: 'Faltan MUX_SIGNING_KEY_ID / MUX_SIGNING_KEY_SECRET para generar broadcastToken' });
+    }
+    const { createLiveStream, createBroadcastToken } = require('../services/mux.service');
+    if (!forceNew && event.muxLiveStreamId && event.muxPlaybackId && event.muxStreamKey) {
+      let broadcastToken = null;
+      try {
+        broadcastToken = createBroadcastToken(event.muxStreamKey, { ttlSeconds: 3600 });
+      } catch (e) {
+        console.error('setupMuxLive: cannot sign broadcast token (existing)', e.message);
+      }
+      if (!broadcastToken) {
+        return res.status(500).json({ success: false, message: 'No se pudo generar token de broadcast de Mux' });
+      }
+      return res.json({
+        success: true,
+        data: {
+          muxLiveStreamId: event.muxLiveStreamId,
+          muxPlaybackId: event.muxPlaybackId,
+          ingest: { url: 'rtmp://global-live.mux.com:5222/app', streamKey: event.muxStreamKey },
+          broadcastToken,
+        },
+      });
+    }
+    if (!hasCreds) {
+      return res.status(500).json({ success: false, message: 'Faltan variables de entorno en el servidor' });
+    }
+    const created = await createLiveStream({ test: String(process.env.MUX_TEST_MODE || '').toLowerCase() === 'true' });
+    event.platform = event.platform || 'mux';
+    event.muxLiveStreamId = created.id || null;
+    event.muxPlaybackId = created.playbackId || null;
+    event.muxStatus = created.status || null;
+    event.muxStreamKey = created.streamKey || null;
+    await event.save();
+    let broadcastToken = null;
+    try {
+      broadcastToken = createBroadcastToken(event.muxStreamKey, { ttlSeconds: 3600 });
+    } catch (e) {
+      console.error('setupMuxLive: cannot sign broadcast token', e.message);
+    }
+    if (!broadcastToken) {
+      return res.status(500).json({ success: false, message: 'No se pudo generar token de broadcast de Mux' });
+    }
+    return res.json({
+      success: true,
+      data: {
+        muxLiveStreamId: event.muxLiveStreamId,
+        muxPlaybackId: event.muxPlaybackId,
+        ingest: { url: created.rtmpUrl, streamKey: created.streamKey },
+        broadcastToken,
+      },
+    });
+  } catch (error) {
+    try {
+      const status = error?.code || error?.response?.status;
+      const payload = error?.response?.data;
+      console.error('setupMuxLive error', status || '', error?.message || '', payload || '');
+    } catch (_) {}
+    return res.status(500).json({ success: false, message: 'Error configurando Mux', error: error.message });
+  }
+};
+
+exports.startMuxRelay = async (req, res) => {
+  try {
+    const io = req.app.get('io');
+    if (!io) {
+      return res.status(500).json({ success: false, message: 'Socket.IO no disponible en el backend' });
+    }
+
+    const { id } = req.params;
+    const { rtmpUrl, streamKey } = req.body || {};
+
+    if (!rtmpUrl || !streamKey) {
+      return res.status(400).json({ success: false, message: 'Faltan rtmpUrl o streamKey' });
+    }
+
+    const eventId = String(id);
+
+    io.to(`event_${eventId}`).emit('muxRelayStart', {
+      eventId,
+      rtmpUrl,
+      streamKey,
+    });
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('startMuxRelay error', error);
+    return res.status(500).json({ success: false, message: 'Error iniciando relay Mux', error: error.message });
+  }
+};
+
+exports.handleMuxWebhook = async (req, res) => {
+  try {
+    const secret = (process.env.MUX_WEBHOOK_SECRET || '').trim();
+    if (!secret) {
+      return res.status(500).json({ success: false, message: 'MUX_WEBHOOK_SECRET faltante' });
+    }
+    const sigHeader = req.headers['mux-signature'] || '';
+    const raw = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body || {});
+    const parts = String(sigHeader).split(',').map(s => s.trim()).filter(Boolean);
+    const timestamp = parts.find(p => p.startsWith('t='))?.slice(2);
+    const signatures = parts.filter(p => p.startsWith('v1=')).map(p => p.slice(3));
+
+    const expected = timestamp
+      ? crypto.createHmac('sha256', secret).update(`${timestamp}.${raw}`).digest('hex')
+      : null;
+
+    const toleranceSec = Number(process.env.MUX_WEBHOOK_TOLERANCE || 300);
+    const isFresh = timestamp && !Number.isNaN(Number(timestamp))
+      ? Math.abs(Date.now() / 1000 - Number(timestamp)) <= toleranceSec
+      : false;
+
+    const expectedBuf = expected ? Buffer.from(expected, 'hex') : null;
+    const valid = !!(expectedBuf && isFresh && signatures.some(sig => {
+      try {
+        const sigBuf = Buffer.from(sig, 'hex');
+        if (sigBuf.length !== expectedBuf.length) return false;
+        return crypto.timingSafeEqual(sigBuf, expectedBuf);
+      } catch (_) {
+        return false;
+      }
+    }));
+
+    if (!valid) {
+      return res.status(400).json({ success: false, message: 'Firma inválida' });
+    }
+    const evt = req.body || {};
+    const type = String(evt.type || '').toLowerCase();
+    const data = evt.data || {};
+    let liveStreamId = data.id || data.live_stream_id || data.source_live_stream_id || null;
+    let event = null;
+    if (liveStreamId) {
+      event = await LiveEvent.findOne({ muxLiveStreamId: liveStreamId }).select('_id status muxAssetId muxPlaybackId');
+    }
+    if (!event && data.asset_id) {
+      event = await LiveEvent.findOne({ muxAssetId: data.asset_id }).select('_id status muxAssetId muxPlaybackId');
+    }
+    if (!event) {
+      return res.json({ success: true });
+    }
+    let newStatus = null;
+    if (type.includes('live_stream.connected') || type.includes('live_stream.active')) newStatus = 'live';
+    else if (type.includes('live_stream.disconnected') || type.includes('live_stream.idle') || type.includes('asset.ready')) newStatus = 'finished';
+    if (type.includes('asset.ready') && data.id && !event.muxAssetId) {
+      event.muxAssetId = String(data.id);
+    }
+    if (newStatus && event.status !== newStatus) {
+      event.status = newStatus;
+      if (newStatus === 'finished') event.endedAt = new Date();
+    }
+    event.muxStatus = type;
+    await event.save();
+    const io = req.app.get('io');
+    if (io && event._id) {
+      io.to(`event_${event._id}`).emit('metricsUpdate', { eventId: String(event._id), status: event.status, muxStatus: event.muxStatus });
+    }
+    return res.json({ success: true });
+  } catch (error) {
+    try {
+      console.error('handleMuxWebhook error', error?.message || error);
+    } catch (_) {}
+    return res.status(500).json({ success: false, message: 'Error procesando webhook de Mux' });
   }
 };
 
@@ -84,38 +277,88 @@ exports.getCampaignSummary = async (req, res) => {
     const eventIds = events.map(e => e._id);
     const campaignMap = new Map(events.map(e => [e._id.toString(), e.campaign]));
 
-    // Obtener métricas de eventos
-    const metrics = await LiveEventMetrics.find({ event: { $in: eventIds } }).select('event revenue salesAmount');
+    // Obtener métricas de eventos y por producto
+    const metrics = await LiveEventMetrics.find({ event: { $in: eventIds } }).select('event uniqueViewers productClicks purchases revenue salesAmount ctr');
+    const LiveEventProductMetrics = require('../models/LiveEventProductMetrics');
+    const productMetrics = await LiveEventProductMetrics.find({ event: { $in: eventIds } }).select('event cartAdds purchases revenue');
 
-    // Agrupar ingresos por campaña
-    const revenueByCampaign = new Map();
+    // Agregados por campaña para KPIs y revenue
+    const aggByCampaign = new Map();
+    const ensureAgg = (cid) => {
+      const k = cid.toString();
+      if (!aggByCampaign.has(k)) {
+        aggByCampaign.set(k, { uniqueViewers: 0, productClicks: 0, cartAdds: 0, purchases: 0, revenue: 0 });
+      }
+      return aggByCampaign.get(k);
+    };
     metrics.forEach(m => {
       const campaignId = campaignMap.get((m.event || '').toString());
       if (!campaignId) return;
-      const existing = revenueByCampaign.get(campaignId.toString()) || 0;
-      revenueByCampaign.set(campaignId.toString(), existing + Number(m.revenue || m.salesAmount || 0));
+      const agg = ensureAgg(campaignId);
+      agg.uniqueViewers += Number(m.uniqueViewers || 0);
+      agg.productClicks += Number(m.productClicks || 0);
+      agg.purchases += Number(m.purchases || 0);
+      agg.revenue += Number(m.revenue || m.salesAmount || 0);
+    });
+    productMetrics.forEach(pm => {
+      const campaignId = campaignMap.get((pm.event || '').toString());
+      if (!campaignId) return;
+      const agg = ensureAgg(campaignId);
+      agg.cartAdds += Number(pm.cartAdds || 0);
+      agg.purchases += Number(pm.purchases || 0);
+      agg.revenue += Number(pm.revenue || 0);
     });
 
-    const campaignIds = Array.from(revenueByCampaign.keys());
+    const campaignIds = Array.from(aggByCampaign.keys());
     const Campaign = require('../models/Campaign');
-    const campaigns = await Campaign.find({ _id: { $in: campaignIds } }).select('name milestones');
+    const campaigns = await Campaign
+      .find({ _id: { $in: campaignIds } })
+      .select('name milestones kpis status shop startDate endDate')
+      .populate('shop', 'name');
 
     const result = campaigns.map(c => {
       const milestones = c.milestones || [];
       const completed = milestones.filter(m => m.completedAt).length; // completedAt puede no existir
+      const kpisObj = c.kpis || {};
+      const selectedKeys = Object.keys(kpisObj).filter(k => kpisObj[k]?.selected);
+      const kpiMapping = { viewers: 'uniqueViewers', clicks: 'productClicks', sales: 'purchases', addtocart: 'cartAdds', ctr: 'ctr', revenue: 'revenue' };
+      const agg = aggByCampaign.get(c._id.toString()) || { uniqueViewers: 0, productClicks: 0, cartAdds: 0, purchases: 0, revenue: 0 };
+      const ctrBase = agg.uniqueViewers > 0 ? agg.uniqueViewers : 0;
+      const ctrAgg = ctrBase > 0 ? +(agg.productClicks * 100 / ctrBase).toFixed(2) : 0;
+      const currentByKey = {
+        viewers: agg.uniqueViewers,
+        clicks: agg.productClicks,
+        sales: agg.purchases,
+        addtocart: agg.cartAdds,
+        ctr: ctrAgg,
+        revenue: agg.revenue,
+      };
+      const kpisCompleted = selectedKeys.filter(k => {
+        const target = Number(kpisObj[k]?.target || 0);
+        const current = Number(currentByKey[k] || 0);
+        return target > 0 ? current >= target : false;
+      }).length;
+      const isCompleted = selectedKeys.length > 0 ? (kpisCompleted === selectedKeys.length) : (completed > 0 && completed === milestones.length) || (c.status === 'closed');
       return {
         campaignId: c._id,
         name: c.name,
-        revenue: revenueByCampaign.get(c._id.toString()) || 0,
+        startDate: c.startDate,
+        endDate: c.endDate,
+        revenue: agg.revenue || 0,
         milestonesCompleted: completed,
         milestonesTotal: milestones.length,
+        kpisSelected: selectedKeys,
+        kpisCompleted,
+        status: c.status,
+        brand: (c.shop && c.shop.name) || undefined,
+        completed: !!isCompleted,
       };
     });
 
     // Incluir campañas que no se encuentren en la consulta Campaign (poco probable)
-    revenueByCampaign.forEach((rev, id) => {
+    aggByCampaign.forEach((agg, id) => {
       if (!result.find(r => r.campaignId.toString() === id)) {
-        result.push({ campaignId: id, name: 'Campaña', revenue: rev, milestonesCompleted: 0, milestonesTotal: 0 });
+        result.push({ campaignId: id, name: 'Campaña', revenue: agg.revenue || 0, milestonesCompleted: 0, milestonesTotal: 0, kpisSelected: [], kpisCompleted: 0, status: '-', completed: false });
       }
     });
 
@@ -194,6 +437,19 @@ exports.updateHighlightedProduct = async (req, res) => {
       event.highlightedProduct = productId;
       await event.save({ session });
 
+      try {
+        const io = req.app.get('io');
+        if (io) {
+          io.to(`event_${event._id}`).emit('highlightChanged', {
+            eventId: event._id,
+            productId,
+            highlighted: true,
+          });
+        }
+      } catch (emitErr) {
+        console.warn('Error emitiendo highlightChanged', emitErr.message);
+      }
+
       // Emitir notificación y persistir historial
       try {
         const io = req.app.get('io');
@@ -240,6 +496,80 @@ exports.getHighlightedProduct = async (req, res) => {
   }
 };
 
+exports.getChatMessages = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { before, limit = 50 } = req.query;
+    const isValidObjectId = mongoose.Types.ObjectId.isValid(id);
+    const event = isValidObjectId ? await LiveEvent.findById(id).select('_id') : await LiveEvent.findOne({ slug: id }).select('_id');
+    if (!event) return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+    const query = { event: event._id, status: 'active' };
+    if (before) query.createdAt = { $lt: new Date(before) };
+    const msgs = await ChatMessage.find(query).sort({ createdAt: -1 }).limit(Math.min(Number(limit) || 50, 100)).populate('user', 'name avatar');
+    res.json({ success: true, data: msgs });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+  }
+};
+
+exports.createChatMessage = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { content } = req.body || {};
+    if (!content || String(content).trim().length === 0) return res.status(400).json({ success: false, message: 'Contenido requerido' });
+    const isValidObjectId = mongoose.Types.ObjectId.isValid(id);
+    const event = isValidObjectId ? await LiveEvent.findById(id).select('_id owner') : await LiveEvent.findOne({ slug: id }).select('_id owner');
+    if (!event) return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+    const msg = await ChatMessage.create({ event: event._id, user: req.user._id, content: String(content).slice(0, 500) });
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        const populated = await ChatMessage.findById(msg._id).populate('user', 'name avatar');
+        io.to(`event_${event._id}`).emit('chat:new', { eventId: event._id.toString(), message: populated });
+        io.to(`event_${id}`).emit('chat:new', { eventId: String(id), message: populated });
+      }
+    } catch (_) {}
+    try {
+      await LiveEventMetrics.updateOne({ event: event._id }, { $inc: { comments: 1 } }, { upsert: true });
+      const io = req.app.get('io');
+      if (io) {
+        const metricsDoc = await LiveEventMetrics.findOne({ event: event._id });
+        io.to(`event_${event._id}`).emit('metricsUpdated', { eventId: event._id.toString(), metrics: metricsDoc });
+      }
+    } catch (_) {}
+    res.json({ success: true, data: msg });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+  }
+};
+
+exports.deleteChatMessage = async (req, res) => {
+  try {
+    const { id, messageId } = req.params;
+    const isValidObjectId = mongoose.Types.ObjectId.isValid(id);
+    const event = isValidObjectId ? await LiveEvent.findById(id).select('_id owner') : await LiveEvent.findOne({ slug: id }).select('_id owner');
+    if (!event) return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+    if (String(event.owner) !== String(req.user._id)) return res.status(403).json({ success: false, message: 'No autorizado' });
+    const msg = await ChatMessage.findOne({ _id: messageId, event: event._id });
+    if (!msg) return res.status(404).json({ success: false, message: 'Mensaje no encontrado' });
+    msg.status = 'deleted';
+    msg.deletedAt = new Date();
+    msg.moderatedBy = req.user._id;
+    await msg.save();
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        const payload = { eventId: event._id.toString(), messageId, message: { _id: msg._id.toString(), user: msg.user?.toString?.() || undefined, createdAt: msg.createdAt, status: msg.status } };
+        io.to(`event_${event._id}`).emit('chat:deleted', payload);
+        io.to(`event_${id}`).emit('chat:deleted', { ...payload, eventId: String(id) });
+      }
+    } catch (_) {}
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+  }
+};
+
 exports.deleteLiveEvent = async (req, res) => {
   try {
     const { id } = req.params;
@@ -272,63 +602,69 @@ exports.updateLiveEvent = async (req, res) => {
     if (title !== undefined) event.title = title;
     if (description !== undefined) event.description = description;
     if (date && time) {
-      event.startDateTime = new Date(`${date}T${time}:00Z`);
+      event.startDateTime = new Date(`${date}T${time}:00`);
     }
-    if (status !== undefined) event.status = status;
 
-    // Manejar cambio de estado y monitoreo de YouTube
-    if (status && status !== event.status) {
+    // Manejar cambio de estado internamente antes de asignar
+    if (status !== undefined) {
       const previousStatus = event.status;
+      const nextStatus = status;
 
-      // Iniciar monitoreo de YouTube cuando el evento entra en vivo
-      if (status === 'live' && previousStatus !== 'live') {
-        try {
-          const YoutubeMonitor = require('../services/youtube.monitor');
-          if (event.youtubeVideoId) {
-            YoutubeMonitor.start(event._id.toString(), event.youtubeVideoId);
-          }
-        } catch (err) {
-          console.error('[LiveEventController] Error iniciando YoutubeMonitor', err);
-        }
-      }
-
-      // Detener monitoreo de YouTube y cerrar highlight cuando el evento finaliza
-      if (status === 'finished' && previousStatus !== 'finished') {
-        try {
-          const YoutubeMonitor = require('../services/youtube.monitor');
-          YoutubeMonitor.stop(event._id.toString());
-        } catch (err) {
-          console.error('[LiveEventController] Error deteniendo YoutubeMonitor', err);
-        }
-
-        if (event.currentHighlightedProduct) {
-          const now = new Date();
-          const elapsedMs = now - (event.highlightStartedAt || now);
-          const elapsedSeconds = Math.floor(elapsedMs / 1000);
-          if (elapsedSeconds > 0) {
-            await LiveEventProductMetrics.findOneAndUpdate(
-              { event: event._id, product: event.currentHighlightedProduct },
-              { $inc: { timeHighlighted: elapsedSeconds } },
-              { upsert: true, new: true }
-            );
-          }
-          event.currentHighlightedProduct = null;
-          event.highlightStartedAt = null;
-
-          // Emitir highlightChanged con null
+      if (nextStatus !== previousStatus) {
+        
+        if (nextStatus === 'live' && previousStatus !== 'live') {
+          event.endedAt = null;
+          event.startDateTime = new Date();
           try {
-            const io = req.app.get('io');
-            if (io) {
-              io.to(`event_${event._id}`).emit('highlightChanged', {
-                eventId: event._id,
-                productId: null,
-              });
+            const YoutubeMonitor = require('../services/youtube.monitor');
+            if (event.youtubeVideoId) {
+              YoutubeMonitor.start(event._id.toString(), event.youtubeVideoId);
             }
-          } catch (e) {
-            console.warn('No se pudo emitir highlightChanged al finalizar live', e.message);
+          } catch (err) {
+            console.error('[LiveEventController] Error iniciando YoutubeMonitor', err);
+          }
+        }
+
+        
+        if (nextStatus === 'finished' && previousStatus !== 'finished') {
+          event.endedAt = new Date();
+          try {
+            const YoutubeMonitor = require('../services/youtube.monitor');
+            YoutubeMonitor.stop(event._id.toString());
+          } catch (err) {
+            console.error('[LiveEventController] Error deteniendo YoutubeMonitor', err);
+          }
+
+          if (event.currentHighlightedProduct) {
+            const now = new Date();
+            const elapsedMs = now - (event.highlightStartedAt || now);
+            const elapsedSeconds = Math.floor(elapsedMs / 1000);
+            if (elapsedSeconds > 0) {
+              await LiveEventProductMetrics.findOneAndUpdate(
+                { event: event._id, product: event.currentHighlightedProduct },
+                { $inc: { timeHighlighted: elapsedSeconds } },
+                { upsert: true, new: true }
+              );
+            }
+            event.currentHighlightedProduct = null;
+            event.highlightStartedAt = null;
+
+            try {
+              const io = req.app.get('io');
+              if (io) {
+                io.to(`event_${event._id}`).emit('highlightChanged', {
+                  eventId: event._id,
+                  productId: null,
+                });
+              }
+            } catch (e) {
+              console.warn('No se pudo emitir highlightChanged al finalizar live', e.message);
+            }
           }
         }
       }
+
+      event.status = nextStatus;
     }
     if (products !== undefined) event.products = products;
     if (socialAccounts !== undefined) event.socialAccounts = socialAccounts;
@@ -359,27 +695,44 @@ exports.getPublicLiveEvents = async (req, res) => {
   }
 };
 
-// Obtener un solo evento en vivo (influencer autenticado)
 exports.getLiveEvent = async (req, res) => {
   try {
     const { id } = req.params;
 
     const isValidObjectId = mongoose.Types.ObjectId.isValid(id);
-
-    // Si es influencer autenticado, puede ver solamente sus propios eventos; de lo contrario devolver 403
-    const query = isValidObjectId ? { _id: id } : { slug: id };
-    if (req.user) {
-      // Si hay usuario autenticado, aseguramos que sea dueño del evento o influencer
-      query.owner = req.user._id;
-    }
+    const baseQuery = isValidObjectId ? { _id: id } : { slug: id };
 
     let event = await LiveEvent
-      .findOne(query)
+      .findOne(baseQuery)
       .populate('products')
-      .populate({ path: 'campaign', select: '_id name kpis' });
+      .populate({ path: 'campaign', select: '_id name kpis' })
+      .populate({
+        path: 'owner',
+        select: 'name fullName avatar influencerProfile followers',
+        populate: { path: 'shop', select: 'name imageUrl followers' }
+      });
 
     if (!event) {
-      return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+      const allowedStatuses = ['published', 'live', 'finished'];
+      event = await LiveEvent
+        .findOne({ ...baseQuery, status: { $in: allowedStatuses } })
+        .populate('products')
+        .populate({ path: 'campaign', select: '_id name kpis' })
+        .populate({
+          path: 'owner',
+          select: 'name fullName avatar influencerProfile followers',
+          populate: { path: 'shop', select: 'name imageUrl followers' }
+        });
+      if (!event) {
+        return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+      }
+    }
+
+    if (req.user && String(event.owner) !== String(req.user._id)) {
+      const allowedStatuses = ['published', 'live', 'finished'];
+      if (!allowedStatuses.includes(event.status)) {
+        return res.status(403).json({ success: false, message: 'No autorizado' });
+      }
     }
 
     // Asegurar que la primera cuenta social coincida con la plataforma principal, si esta existe
@@ -422,6 +775,50 @@ exports.getMetrics = async (req, res) => {
 
     // Preparar payload de respuesta
     const responsePayload = { metrics };
+
+    try {
+      const LiveEventViewerSnapshot = require('../models/LiveEventViewerSnapshot');
+      const eventObjectId = mongoose.Types.ObjectId(eventId);
+      const snaps = await LiveEventViewerSnapshot.aggregate([
+        { $match: { event: eventObjectId } },
+        {
+          $group: {
+            _id: null,
+            avgViewers: { $avg: '$viewersCount' },
+            maxViewers: { $max: '$viewersCount' },
+          },
+        },
+      ]);
+      const liveEventDoc = await LiveEvent.findById(eventId).select('startDateTime endedAt status updatedAt');
+      const computedAvg = snaps && snaps.length > 0 ? Math.round(Number(snaps[0].avgViewers || 0)) : 0;
+      const computedPeak = snaps && snaps.length > 0 ? Math.round(Number(snaps[0].maxViewers || 0)) : 0;
+      let computedDuration = 0;
+      if (liveEventDoc && liveEventDoc.startDateTime) {
+        const fallbackEnd = liveEventDoc.status === 'finished' ? (liveEventDoc.updatedAt || new Date()) : new Date();
+        const endTime = liveEventDoc.endedAt || fallbackEnd;
+        const diffMs = endTime.getTime() - new Date(liveEventDoc.startDateTime).getTime();
+        if (!Number.isNaN(diffMs) && diffMs >= 0) {
+          computedDuration = Math.floor(diffMs / 1000);
+        }
+      }
+      let needsSave = false;
+      if (!metrics.avgConcurrentViewers || metrics.avgConcurrentViewers === 0) {
+        metrics.avgConcurrentViewers = computedAvg;
+        needsSave = true;
+      }
+      if (!metrics.peakViewers || metrics.peakViewers === 0) {
+        metrics.peakViewers = computedPeak;
+        needsSave = true;
+      }
+      if ((!metrics.durationSeconds || metrics.durationSeconds === 0) && computedDuration > 0) {
+        metrics.durationSeconds = computedDuration;
+        needsSave = true;
+      }
+      if (needsSave) {
+        await metrics.save();
+      }
+    } catch (derErr) {
+    }
 
     // Verificar si el evento está vinculado a una campaña para incluir objetivos
     try {
@@ -499,6 +896,8 @@ exports.getProductMetrics = async (req, res) => {
   }
 };
 
+const uniqueViewerRegistry = new Map();
+
 exports.updateMetrics = async (req, res) => {
   try {
     const { id } = req.params;
@@ -529,24 +928,33 @@ exports.updateMetrics = async (req, res) => {
       comments = 0,
       newFollowers,
       productId,
+      viewerId,
     } = req.body;
 
     // Construir objeto de actualización dinámicamente
     const update = {};
 
     // Incrementos acumulativos
+    let uniqueInc = Number(uniqueViewers);
+    if (uniqueInc > 0 && typeof viewerId === 'string' && viewerId) {
+      const key = String(eventId);
+      let set = uniqueViewerRegistry.get(key);
+      if (!set) { set = new Set(); uniqueViewerRegistry.set(key, set); }
+      if (set.has(viewerId)) { uniqueInc = 0; } else { set.add(viewerId); }
+    }
     const incFields = {
-  uniqueViewers: Number(uniqueViewers),
-  views: Number(views),
-  productClicks: Number(productClicks),
-  cartAdds: Number(cartAdds),
-  purchases: Number(purchases),
-  directSales: Number(directSales),
-  salesAmount: Number(salesAmount),
-  likes: Number(likes),
-  shares: Number(shares),
-  comments: Number(comments),
-};
+      uniqueViewers: uniqueInc,
+      views: Number(views),
+      productClicks: Number(productClicks),
+      cartAdds: Number(cartAdds),
+      purchases: Number(purchases),
+      directSales: Number(directSales),
+      salesAmount: Number(salesAmount),
+      likes: Number(likes),
+      shares: Number(shares),
+      comments: Number(comments),
+      newFollowers: Number(newFollowers),
+    };
     // Remover claves con incremento 0 para evitar crearlas innecesariamente
     Object.keys(incFields).forEach(key => {
       if (incFields[key] && incFields[key] !== 0) {
@@ -564,24 +972,21 @@ exports.updateMetrics = async (req, res) => {
       update.$set = { ...(update.$set || {}), avgConcurrentViewers };
     }
 
-    if (newFollowers !== undefined) {
-      update.$set = { ...(update.$set || {}), newFollowers };
-    }
+    // newFollowers se maneja como incremento acumulativo
 
-    // Si durationSeconds viene explícito en el payload, lo usamos; de lo contrario, lo calculamos a partir de la hora de inicio del evento
     let finalDurationSeconds = durationSeconds;
     if (finalDurationSeconds === undefined) {
       try {
-        const liveEvent = await LiveEvent.findById(id).select('startDateTime status updatedAt');
+        const liveEvent = await LiveEvent.findById(id).select('startDateTime status endedAt updatedAt');
         if (liveEvent && liveEvent.startDateTime) {
-          const endTime = liveEvent.status === 'finished' && liveEvent.updatedAt ? liveEvent.updatedAt : new Date();
+          const fallbackEnd = liveEvent.status === 'finished' ? (liveEvent.updatedAt || new Date()) : new Date();
+          const endTime = liveEvent.endedAt || fallbackEnd;
           const diffMs = endTime.getTime() - new Date(liveEvent.startDateTime).getTime();
           if (!Number.isNaN(diffMs) && diffMs >= 0) {
             finalDurationSeconds = Math.floor(diffMs / 1000);
           }
         }
       } catch (dErr) {
-        console.warn('No se pudo calcular durationSeconds automáticamente', dErr.message);
       }
     }
 
@@ -594,6 +999,22 @@ exports.updateMetrics = async (req, res) => {
       new: true,
       upsert: true,
     });
+
+    try {
+      const incNewFollowers = Number(incFields.newFollowers || 0);
+      if (incNewFollowers > 0) {
+        const evt = await LiveEvent.findById(id).select('owner');
+        if (evt && evt.owner) {
+          await User.updateOne({ _id: evt.owner }, { $inc: { followers: incNewFollowers } });
+          try {
+            const io = req.app.get('io');
+            if (io) {
+              io.to(`user_${evt.owner.toString()}`).emit('user:followersIncrement', { userId: evt.owner.toString(), amount: incNewFollowers, eventId: id });
+            }
+          } catch (emitErr) {}
+        }
+      }
+    } catch (ufErr) {}
 
     // Si se proporciona productId, registrar también en métricas por producto
     let updatedProductMetrics = null;
@@ -644,10 +1065,12 @@ exports.updateMetrics = async (req, res) => {
       purchases: { type: 'sale', label: 'venta(s) realizada(s)' },
       comments: { type: 'comment', label: 'comentario(s)' },
       newFollowers: { type: 'follower', label: 'nuevo(s) seguidor(es)' },
+      likes: { type: 'other', label: 'me gusta' },
+      shares: { type: 'other', label: 'compartido(s)' },
     };
 
     Object.entries(incFields).forEach(([key, val]) => {
-      if (val && val !== 0 && activityMap[key]) {
+      if (typeof val === 'number' && val > 0 && activityMap[key]) {
         newActivityEntries.push({
           type: activityMap[key].type,
           message: `${val} ${activityMap[key].label}`,
@@ -676,15 +1099,99 @@ exports.updateMetrics = async (req, res) => {
       }
     }
 
+    let kpiProgressPayload = null;
+    let campaignPayload = null;
+    try {
+      const liveEvent = await LiveEvent.findById(id).select('campaign');
+      if (liveEvent && liveEvent.campaign) {
+        const Campaign = require('../models/Campaign');
+        const campaignDoc = await Campaign.findById(liveEvent.campaign);
+        if (campaignDoc) {
+          const kpiMapping = {
+            viewers: 'uniqueViewers',
+            clicks: 'productClicks',
+            sales: 'purchases',
+            addtocart: 'cartAdds',
+            ctr: 'ctr',
+            revenue: 'revenue',
+          };
+          const kpiLabels = {
+            viewers: 'Espectadores',
+            clicks: 'Clics',
+            sales: 'Ventas',
+            addtocart: 'Carritos',
+            ctr: 'CTR',
+            revenue: 'Ingresos',
+          };
+          const kpiProgress = {};
+          for (const [kpiKey, cfg] of Object.entries(campaignDoc.kpis || {})) {
+            if (!cfg || !cfg.selected) continue;
+            const field = kpiMapping[kpiKey];
+            const currentVal = field ? Number(metrics[field] || 0) : 0;
+            const targetVal = Number(cfg.target || 0);
+            const pct = targetVal > 0 ? Math.min(100, Math.round((currentVal / targetVal) * 100)) : 0;
+            kpiProgress[kpiKey] = { target: targetVal, current: currentVal, progress: pct };
+
+            const incFieldMap = {
+              viewers: 'uniqueViewers',
+              clicks: 'productClicks',
+              sales: 'purchases',
+              addtocart: 'cartAdds',
+              revenue: 'salesAmount',
+            };
+            const incField = incFieldMap[kpiKey];
+            const incChanged = incField ? Number((req.body || {})[incField] || 0) > 0 : false;
+            const reached = targetVal > 0 && currentVal >= targetVal;
+            if (incChanged && reached) {
+              newActivityEntries.push({
+                type: 'milestone',
+                message: `Milestone alcanzado: ${kpiLabels[kpiKey]} ${currentVal}/${targetVal}`,
+                ts: new Date(),
+              });
+
+              try {
+                const idx = (campaignDoc.milestones || []).findIndex(m => m.kpiKey === kpiKey && !m.completedAt);
+                if (idx > -1) {
+                  campaignDoc.milestones[idx].completedAt = new Date();
+                  await campaignDoc.save();
+                }
+              } catch (saveErr) {}
+            }
+          }
+          // Si todos los milestones están completados, cerrar campaña
+          try {
+            const milestonesArr = campaignDoc.milestones || [];
+            const allCompleted = milestonesArr.length > 0 && milestonesArr.every(m => !!m.completedAt);
+            if (allCompleted && campaignDoc.status !== 'closed') {
+              campaignDoc.status = 'closed';
+              await campaignDoc.save();
+            }
+          } catch (e) {}
+          kpiProgressPayload = kpiProgress;
+          campaignPayload = {
+            _id: campaignDoc._id,
+            name: campaignDoc.name,
+            status: campaignDoc.status,
+            milestones: (campaignDoc.milestones || []).map(m => ({
+              name: m.name,
+              description: m.description,
+              date: m.date,
+              kpiKey: m.kpiKey,
+              completedAt: m.completedAt
+            }))
+          };
+        }
+      }
+    } catch (e) {}
+
     // Emitir evento a través de Socket.IO para actualizar en tiempo real
     try {
       const io = req.app.get('io');
       if (io) {
-        // Emitir a sala específica del evento para limitar audiencia
-        io.to(`event_${id}`).emit('metricsUpdate', { eventId: id, metrics });
-        // Compatibilidad legacy
-        io.to(`event_${id}`).emit('metricsUpdated', { eventId: id, metrics });
+        io.to(`event_${id}`).emit('metricsUpdate', { eventId: id, metrics, kpiProgress: kpiProgressPayload, campaign: campaignPayload });
+        io.to(`event_${id}`).emit('metricsUpdated', { eventId: id, metrics, kpiProgress: kpiProgressPayload, campaign: campaignPayload });
 
+        
         // Emitir feed de actividad recién generado
         if (newActivityEntries.length > 0) {
           io.to(`event_${id}`).emit('activityEvent', {
@@ -770,7 +1277,17 @@ exports.getViewerSeries = async (req, res) => {
 
     const LiveEventViewerSnapshot = require('../models/LiveEventViewerSnapshot');
 
-    const match = { event: id };
+    // Permitir buscar por ObjectId o slug
+    let eventId = id;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      const evt = await LiveEvent.findOne({ slug: id }).select('_id');
+      if (!evt) {
+        return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+      }
+      eventId = evt._id;
+    }
+
+    const match = { event: eventId };
     if (from) {
       match.timestamp = { ...match.timestamp, $gte: new Date(from) };
     }
@@ -832,6 +1349,8 @@ exports.getAggregatedSummary = async (req, res) => {
     const events = await LiveEvent.find({ owner: userId, startDateTime: { $gte: start }, ...platformFilter }).select('_id status startDateTime');
     const eventIds = events.map(e => e._id);
     const metrics = await LiveEventMetrics.find({ event: { $in: eventIds } });
+    const LiveEventProductMetrics = require('../models/LiveEventProductMetrics');
+    const productMetricsCurr = await LiveEventProductMetrics.find({ event: { $in: eventIds } });
 
     const livesEmitted = events.length;
     let durationSeconds = 0;
@@ -855,11 +1374,15 @@ exports.getAggregatedSummary = async (req, res) => {
       uniqueViewers += Number(m.uniqueViewers || 0);
       views += Number(m.views || 0);
       productClicks += Number(m.productClicks || 0);
-      cartAdds += Number(m.cartAdds || 0);
-      purchases += Number(m.purchases || 0);
       revenue += Number(m.revenue || m.salesAmount || 0);
       comments += Number(m.comments || 0);
       newFollowers += Number(m.newFollowers || 0);
+    });
+
+    productMetricsCurr.forEach(pm => {
+      cartAdds += Number(pm.cartAdds || 0);
+      purchases += Number(pm.purchases || 0);
+      revenue += Number(pm.revenue || 0);
     });
 
     const avgConcurrentViewers = avgConcurrentWeight > 0 ? Math.round(avgConcurrentSum / avgConcurrentWeight) : 0;
@@ -870,19 +1393,24 @@ exports.getAggregatedSummary = async (req, res) => {
     const prevEvents = await LiveEvent.find({ owner: userId, startDateTime: { $gte: prevStart, $lt: start }, ...platformFilter }).select('_id');
     const prevIds = prevEvents.map(e => e._id);
     const prevMetrics = await LiveEventMetrics.find({ event: { $in: prevIds } });
+    const productMetricsPrev = await LiveEventProductMetrics.find({ event: { $in: prevIds } });
 
     const sumPrev = prevMetrics.reduce((acc, m) => {
       acc.durationSeconds += Number(m.durationSeconds || 0);
       acc.uniqueViewers += Number(m.uniqueViewers || 0);
       acc.views += Number(m.views || 0);
       acc.productClicks += Number(m.productClicks || 0);
-      acc.cartAdds += Number(m.cartAdds || 0);
-      acc.purchases += Number(m.purchases || 0);
       acc.revenue += Number(m.revenue || m.salesAmount || 0);
       acc.comments += Number(m.comments || 0);
       acc.newFollowers += Number(m.newFollowers || 0);
       return acc;
     }, { durationSeconds: 0, uniqueViewers: 0, views: 0, productClicks: 0, cartAdds: 0, purchases: 0, revenue: 0, comments: 0, newFollowers: 0 });
+
+    productMetricsPrev.forEach(pm => {
+      sumPrev.cartAdds += Number(pm.cartAdds || 0);
+      sumPrev.purchases += Number(pm.purchases || 0);
+      sumPrev.revenue += Number(pm.revenue || 0);
+    });
 
     function trend(curr, prev) {
       if (!prev || prev === 0) return 0;
@@ -902,6 +1430,18 @@ exports.getAggregatedSummary = async (req, res) => {
       revenue,
       comments,
       newFollowers,
+      prev: {
+        durationSeconds: sumPrev.durationSeconds,
+        uniqueViewers: sumPrev.uniqueViewers,
+        productClicks: sumPrev.productClicks,
+        cartAdds: sumPrev.cartAdds,
+        purchases: sumPrev.purchases,
+        revenue: sumPrev.revenue,
+        comments: sumPrev.comments,
+        newFollowers: sumPrev.newFollowers,
+        eventsCount: prevEvents.length || 0,
+        peakViewers: prevMetrics.reduce((max, m) => Math.max(max, Number(m.peakViewers || 0)), 0),
+      },
       trends: {
         durationSeconds: trend(durationSeconds, sumPrev.durationSeconds),
         uniqueViewers: trend(uniqueViewers, sumPrev.uniqueViewers),
@@ -911,6 +1451,13 @@ exports.getAggregatedSummary = async (req, res) => {
         revenue: trend(revenue, sumPrev.revenue),
         comments: trend(comments, sumPrev.comments),
         newFollowers: trend(newFollowers, sumPrev.newFollowers),
+        livesEmitted: trend(livesEmitted, prevEvents.length || 0),
+        peakViewers: trend(peakViewers, prevMetrics.reduce((max, m) => Math.max(max, Number(m.peakViewers || 0)), 0)),
+        ctr: (() => {
+          const ctrPrevBase = sumPrev.views > 0 ? sumPrev.views : sumPrev.uniqueViewers;
+          const ctrPrev = ctrPrevBase > 0 ? +(sumPrev.productClicks * 100 / ctrPrevBase).toFixed(2) : 0;
+          return trend(ctr, ctrPrev);
+        })(),
       }
     };
 
@@ -968,6 +1515,8 @@ exports.getAggregatedAudienceSeries = async (req, res) => {
     const platformFilter = platform && platform !== 'all' ? { 'socialAccounts.platform': platform } : {};
     const events = await LiveEvent.find({ owner: userId, startDateTime: { $gte: start }, ...platformFilter }).select('_id startDateTime');
     const eventIds = events.map(e => e._id);
+    const metricsArr = await LiveEventMetrics.find({ event: { $in: eventIds } }).select('event uniqueViewers productClicks');
+    const eventStartMap = new Map(events.map(e => [e._id.toString(), e.startDateTime]));
 
     const match = { event: { $in: eventIds }, timestamp: { $gte: start } };
 
@@ -984,12 +1533,19 @@ exports.getAggregatedAudienceSeries = async (req, res) => {
         { $sort: { _id: 1 } },
       ]);
 
-      const startMap = new Map(events.map(e => [e._id.toString(), e.startDateTime]));
-      const normalized = series.map(s => ({
-        timestamp: startMap.get((s._id || '').toString()) || start,
-        avgViewers: s.avgViewers || 0,
-        maxViewers: s.maxViewers || 0,
-      }));
+      const metricsMap = new Map(metricsArr.map(m => [m.event.toString(), { uv: Number(m.uniqueViewers || 0), clicks: Number(m.productClicks || 0) }]));
+      const normalized = series.map(s => {
+        const idStr = (s._id || '').toString();
+        const startTs = eventStartMap.get(idStr) || start;
+        const mm = metricsMap.get(idStr) || { uv: 0, clicks: 0 };
+        const ctr = mm.uv > 0 ? +(mm.clicks * 100 / mm.uv).toFixed(2) : 0;
+        return {
+          timestamp: startTs,
+          avgViewers: s.avgViewers || 0,
+          maxViewers: s.maxViewers || 0,
+          ctr,
+        };
+      });
       return res.json({ success: true, data: normalized });
     } else {
       const bucketSizeMs = groupBy === 'day' ? 24 * 60 * 60 * 1000 : 60 * 60 * 1000;
@@ -1012,10 +1568,145 @@ exports.getAggregatedAudienceSeries = async (req, res) => {
         { $sort: { _id: 1 } },
         { $project: { _id: 0, timestamp: "$_id", avgViewers: 1, maxViewers: 1 } },
       ]);
-      return res.json({ success: true, data: series });
+      const ctrBuckets = new Map();
+      metricsArr.forEach(m => {
+        const evId = (m.event || '').toString();
+        const sd = eventStartMap.get(evId);
+        if (!sd) return;
+        const t = new Date(sd);
+        const base = Math.floor(t.getTime() / bucketSizeMs) * bucketSizeMs;
+        const key = new Date(base).toISOString();
+        const curr = ctrBuckets.get(key) || { uv: 0, clicks: 0 };
+        curr.uv += Number(m.uniqueViewers || 0);
+        curr.clicks += Number(m.productClicks || 0);
+        ctrBuckets.set(key, curr);
+      });
+      const withCtr = series.map(s => {
+        const key = new Date(s.timestamp).toISOString();
+        const b = ctrBuckets.get(key);
+        const ctr = b && b.uv > 0 ? +((b.clicks * 100) / b.uv).toFixed(2) : 0;
+        return { ...s, ctr };
+      });
+      return res.json({ success: true, data: withCtr });
     }
   } catch (error) {
     console.error('Error agregando audiencia', error);
     return res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+  }
+};
+
+exports.getAdminLiveEventsSummary = async (req, res) => {
+  try {
+    const [totalEvents, draftEvents, publishedEvents, liveEvents, finishedEvents, linkedCampaignEvents] = await Promise.all([
+      require('../models/LiveEvent').countDocuments({}),
+      require('../models/LiveEvent').countDocuments({ status: 'draft' }),
+      require('../models/LiveEvent').countDocuments({ status: 'published' }),
+      require('../models/LiveEvent').countDocuments({ status: 'live' }),
+      require('../models/LiveEvent').countDocuments({ status: 'finished' }),
+      require('../models/LiveEvent').countDocuments({ campaign: { $ne: null } })
+    ]);
+
+    return res.json({
+      success: true,
+      data: { totalEvents, draftEvents, publishedEvents, liveEvents, finishedEvents, linkedCampaignEvents },
+      message: 'Resumen de eventos en vivo'
+    });
+  } catch (error) {
+    console.error('Error obteniendo resumen de eventos en vivo', error);
+    return res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+  }
+};
+
+exports.listAdminLiveEvents = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit || '20'), 10)));
+    const { status, ownerEmail, campaignId } = req.query || {};
+
+    const filter = {};
+    if (status) filter.status = status;
+    if (campaignId) filter.campaign = campaignId;
+
+    if (ownerEmail && typeof ownerEmail === 'string' && ownerEmail.trim() !== '') {
+      const owners = await User.find({ email: new RegExp(`^${ownerEmail}`, 'i') }).select('_id');
+      const ownerIds = owners.map(u => u._id);
+      if (ownerIds.length > 0) filter.owner = { $in: ownerIds };
+      else filter.owner = null;
+    }
+
+    const total = await LiveEvent.countDocuments(filter);
+    const events = await LiveEvent.find(filter)
+      .select('title startDateTime status owner campaign youtubeVideoId')
+      .populate({ path: 'owner', select: 'name fullName email avatar' })
+      .populate({ path: 'campaign', select: '_id name' })
+      .sort({ startDateTime: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit);
+
+    return res.json({ success: true, data: { total, page, limit, events } });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Error listando eventos', error: error.message });
+  }
+};
+
+exports.updateLiveEventStateAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, youtubeVideoId } = req.body || {};
+    const allowed = ['draft', 'published', 'live', 'finished'];
+    if (!allowed.includes(String(status))) {
+      return res.status(400).json({ success: false, message: 'Estado inválido' });
+    }
+
+    const event = await LiveEvent.findById(id);
+    if (!event) {
+      return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+    }
+
+    const prevStatus = event.status;
+    const before = { status: prevStatus };
+
+    if (status !== prevStatus) {
+      if (status === 'live' && prevStatus !== 'live') {
+        event.endedAt = null;
+        if (!event.startDateTime || event.startDateTime > new Date()) {
+          event.startDateTime = new Date();
+        }
+        try {
+          const YoutubeMonitor = require('../services/youtube.monitor');
+          const vid = youtubeVideoId !== undefined ? youtubeVideoId : event.youtubeVideoId;
+          if (vid) {
+            YoutubeMonitor.start(event._id.toString(), vid);
+          }
+        } catch (_) {}
+      }
+      if (status === 'finished' && prevStatus !== 'finished') {
+        event.endedAt = new Date();
+        try {
+          const YoutubeMonitor = require('../services/youtube.monitor');
+          YoutubeMonitor.stop(event._id.toString());
+        } catch (_) {}
+      }
+    }
+
+    event.status = status;
+    if (youtubeVideoId !== undefined) event.youtubeVideoId = youtubeVideoId;
+    await event.save();
+
+    try {
+      await AuditLog.create({
+        actor: req.user.id,
+        action: 'liveEvent.status.update',
+        entityType: 'LiveEvent',
+        entityId: event._id,
+        before,
+        after: { status: event.status },
+        metadata: { ip: req.ip }
+      });
+    } catch (_) {}
+
+    return res.json({ success: true, data: event, message: 'Estado de evento actualizado' });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Error actualizando estado', error: error.message });
   }
 };

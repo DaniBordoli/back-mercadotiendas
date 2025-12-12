@@ -3,6 +3,7 @@ const router = express.Router();
 const { check, validationResult } = require('express-validator');
 const campaignController = require('../controllers/campaign.controller');
 const { verifyToken } = require('../middlewares/auth');
+const requireAdmin = require('../middlewares/admin');
 
 // GET /api/campaigns - Obtener todas las campañas
 router.get('/', campaignController.getAllCampaigns);
@@ -41,5 +42,15 @@ router.patch('/:id/step3', verifyToken, campaignController.updateCampaign);
 
 // PATCH /api/campaigns/:id/status - Actualizar estado de una campaña (requiere autenticación)
 router.patch('/:id/status', verifyToken, campaignController.updateCampaignStatus);
+
+// POST /api/campaigns/:id/invite - Invitar a influencer a campaña
+router.post('/:id/invite', verifyToken, campaignController.inviteInfluencer);
+
+// GET /api/campaigns/admin/summary - Resumen de campañas (admin)
+router.get('/admin/summary', verifyToken, requireAdmin, campaignController.getAdminCampaignsSummary);
+
+// Administración de campañas (admin)
+router.get('/admin', verifyToken, requireAdmin, campaignController.listAdminCampaigns);
+router.patch('/admin/:id/state', verifyToken, requireAdmin, campaignController.updateCampaignStateAdmin);
 
 module.exports = router;

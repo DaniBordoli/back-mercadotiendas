@@ -260,10 +260,9 @@ const handleChat = async (req, res) => {
         const isConfirmation = confirmationWords.some(word => lastUserMessage.startsWith(word));
         if (isConfirmation) {
             return successResponse(res, {
-                reply: '¡Listo! Procede a crear la tienda con los datos proporcionados.',
+                reply: '¡Listo! Revisa el resumen y confirma la creación.',
                 templateUpdates: null,
                 isFinalStep: true,
-                shouldCreateShop: true,
                 shopData: {
                     shopName: currentTemplate.shopName,
                     layoutDesign: currentTemplate.layoutDesign,
@@ -278,7 +277,7 @@ const handleChat = async (req, res) => {
                     history: currentTemplate.history,
                     values: currentTemplate.values
                 }
-            }, 'Confirmación recibida, proceder a crear tienda');
+            }, 'Confirmación recibida, mostrar resumen final');
         }
        
         return successResponse(res, {

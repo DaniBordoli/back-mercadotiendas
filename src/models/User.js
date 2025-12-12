@@ -111,11 +111,41 @@ const userSchema = new mongoose.Schema({
     type: Object, // Puede contener username, social media, category, niches, etc.
     default: null,
   },
+  // Usuarios seguidos por el usuario autenticado
+  followingUsers: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  }],
+  // Conteo de seguidores del usuario (seguidores internos de la plataforma)
+  followers: {
+    type: Number,
+    default: 0,
+  },
   // Tiendas seguidas por el usuario
   followingShops: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Shop',
   }]
+  ,
+  // Preferencias del usuario
+  preferences: {
+    type: Object,
+    default: () => ({
+      emailNotifications: true,
+      inAppNotifications: true,
+      language: 'es-AR',
+      timezone: 'America/Argentina/Buenos_Aires'
+    })
+  },
+  // Seguridad: estado de 2FA (TOTP/email)
+  twoFactorEnabled: {
+    type: Boolean,
+    default: false
+  },
+  twoFactorSecret: {
+    type: String,
+    default: null
+  }
 });
 
 // Método para encriptar contraseña

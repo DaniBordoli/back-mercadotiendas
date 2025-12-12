@@ -29,10 +29,10 @@ const createReview = async (req, res) => {
           users: [product.shop.owner],
           type: NotificationTypes.PRODUCT_REVIEW,
           title: 'Nueva reseña recibida',
-          message: `Tu producto ${product.name} ha recibido una nueva reseña`,
+          message: `Tu producto ${(product.nombre || product.name || '')} ha recibido una nueva reseña`,
           entity: product._id,
           data: {
-            productName: product.name || '',
+            productName: (product.nombre || product.name || ''),
             rating: review.rating || 0,
             reviewerName: review.userId?.fullName || review.userId?.name || 'Usuario'
           },
@@ -61,14 +61,15 @@ const getProductReviews = async (req, res) => {
     const { productId } = req.params;
 
     const reviews = await ProductReview.find({ productId })
-      .populate('userId', 'fullName name')
+      .populate('userId', 'fullName name avatar')
       .sort({ createdAt: -1 });
 
     // Asegurar que reviews es un array y transformar respuesta para incluir userName
     const reviewsArray = Array.isArray(reviews) ? reviews : [];
     const reviewsWithUserName = reviewsArray.map(review => ({
       ...review.toObject(),
-      userName: review.userId?.fullName || review.userId?.name || 'Usuario Anónimo'
+      userName: review.userId?.fullName || review.userId?.name || 'Usuario Anónimo',
+      userAvatar: review.userId?.avatar || null
     }));
 
     successResponse(res, reviewsWithUserName, 'Reseñas obtenidas exitosamente');

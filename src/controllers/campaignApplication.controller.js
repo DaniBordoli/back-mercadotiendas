@@ -644,7 +644,7 @@ exports.submitMilestone = async (req, res) => {
 exports.reviewMilestone = async (req, res) => {
   try {
     const { appId, milestoneId } = req.params;
-    const { status, reviewNotes } = req.body || {};
+    const { status, reviewNotes, rating, comment, tags } = req.body || {};
 
     if (!mongoose.Types.ObjectId.isValid(appId) || !mongoose.Types.ObjectId.isValid(milestoneId)) {
       return res.status(400).json({ success: false, message: 'IDs inválidos' });
@@ -693,7 +693,70 @@ exports.reviewMilestone = async (req, res) => {
       }
     } catch (e) {}
 
-    // Si el hito fue aprobado, verificar completitud
+    try {
+      const normalizedRating = Number(rating);
+      const hasRating = !isNaN(normalizedRating) && normalizedRating >= 1 && normalizedRating <= 5;
+      if (hasRating) {
+        const InfluencerReview = require('../models/InfluencerReview');
+        const { recalcInfluencerRating } = require('./influencerReview.controller');
+
+        const exists = await InfluencerReview.findOne({
+          campaignId: application.campaign._id,
+          influencerId: application.user,
+          companyId: req.user.id
+        });
+
+        if (!exists) {
+          const HOURS_48 = 48 * 60 * 60 * 1000;
+          const tagMap = {
+            quality: 'content_quality',
+            milestones: 'milestone_compliance',
+            punctuality: 'punctuality',
+            communication: 'communication',
+            impact: 'impact_sales'
+          };
+          const safeTags = Array.isArray(tags)
+            ? tags.map(t => tagMap[t] || undefined).filter(Boolean)
+            : [];
+
+          const reviewDoc = new InfluencerReview({
+            campaignId: application.campaign._id,
+            influencerId: application.user,
+            companyId: req.user.id,
+            rating: normalizedRating,
+            comment: typeof comment === 'string' ? comment.trim() : undefined,
+            tags: safeTags,
+            editableUntil: new Date(Date.now() + HOURS_48)
+          });
+          await reviewDoc.save();
+
+          try {
+            await recalcInfluencerRating(application.user);
+          } catch (recalcErr) {
+            console.error('Error recalculando rating influencer tras reseña en revisión de hito:', recalcErr);
+          }
+
+          try {
+            const io = req.app.get('io');
+            if (io) {
+              await NotificationService.emitAndPersist(io, {
+                users: [application.user],
+                type: NotificationTypes.INFLUENCER_REVIEW,
+                title: 'Has recibido una nueva reseña',
+                message: 'La marca dejó una reseña al revisar tu hito',
+                entity: reviewDoc._id,
+                data: { campaignName: application.campaign?.name || '', rating: normalizedRating }
+              });
+            }
+          } catch (notifyErr) {
+            console.error('Error notificando reseña creada durante revisión de hito:', notifyErr);
+          }
+        }
+      }
+    } catch (ratingErr) {
+      console.error('Error creando reseña durante revisión de hito:', ratingErr);
+    }
+
     if (status === 'approved') {
       const allApproved = application.milestones.every((m) => m.status === 'approved');
       if (allApproved) {
