@@ -39,13 +39,29 @@ mongoose.connection.once('open', async () => {
   }
 });
 
-// Middlewares
-app.use(cors());
-// Asegurar CORS en cualquier respuesta (incluyendo errores de terceros/proxies)
+const allowedOrigins = [
+  'https://mercadotiendas-pr-testing.onrender.com',
+  'http://localhost:3000'
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(null, false);
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: true
+}));
+
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', req.header('Access-Control-Request-Headers') || 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -88,8 +104,13 @@ const server = app.listen(config.port, () => {
 const { Server } = require('socket.io');
 const io = new Server(server, {
   cors: {
-    origin: '*',
-    methods: ['GET', 'POST', 'PATCH']
+    origin: [
+      'https://mercadotiendas-pr-testing.onrender.com',
+      'http://localhost:3000'
+    ],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    credentials: true
   }
 });
 
