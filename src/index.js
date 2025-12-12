@@ -7,7 +7,6 @@ const https = require('https');
 const path = require('path');
 const mongoose = require('mongoose');
 const ffmpeg = require('fluent-ffmpeg');
-const ffmpegPath = require('ffmpeg-static');
 const { PassThrough } = require('stream');
 const connectDB = require('./config/database');
 const routes = require('./routes');
@@ -129,8 +128,7 @@ const eventIntervals = new Map();
 
 // Exponer instancia de io a través de la app para usarla en controladores
 app.set('io', io);
-
-ffmpeg.setFfmpegPath(ffmpegPath);
+});
 
 io.on('connection', (socket) => {
   console.log('Cliente Socket.IO conectado:', socket.id);
