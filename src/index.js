@@ -43,6 +43,14 @@ mongoose.connection.once('open', async () => {
 
 // Middlewares
 app.use(cors());
+// Asegurar CORS en cualquier respuesta (incluyendo errores de terceros/proxies)
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', req.header('Access-Control-Request-Headers') || 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false, limit: '10mb' }));
@@ -157,6 +165,8 @@ io.on('connection', (socket) => {
       } catch (_) {}
 
       const args = [
+        '-nostdin',
+        '-loglevel', 'warning',
         '-re',
         '-f', 'webm',
         '-i', 'pipe:0',
@@ -194,7 +204,7 @@ io.on('connection', (socket) => {
         try {
           console.info('muxRelayWS: ffmpeg closed', { eventId: String(event._id), code, signal });
         } catch (_) {}
-        emitMuxRelayState(String(event._id), 'closed');
+        emitMuxRelayState(String(event._id), code === 0 ? 'closed' : 'error');
         stopMuxRelay(event._id);
       });
       ffmpeg.on('error', (err) => {
@@ -233,7 +243,10 @@ io.on('connection', (socket) => {
         emitMuxRelayState(eventId, 'streaming');
         try { console.info('muxRelayWS: first chunk', { eventId, bytes: buf.length }); } catch (_) {}
       }
-      relay.ffmpeg.stdin.write(buf);
+      const ok = relay.ffmpeg.stdin.write(buf);
+      if (ok === false) {
+        try { console.error('muxRelayWS: backpressure', { eventId }); } catch (_) {}
+      }
     } catch (err) {
       try { console.error('muxRelayWS: write error', { eventId, message: err?.message }); } catch (_) {}
       emitMuxRelayState(eventId, 'error');
