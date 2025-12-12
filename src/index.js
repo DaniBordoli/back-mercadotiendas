@@ -6,7 +6,7 @@ const fs = require('fs');
 const https = require('https');
 const path = require('path');
 const mongoose = require('mongoose');
-const ffmpegStatic = require('ffmpeg-static');
+const ffmpegPath = require('ffmpeg-static');
 const { spawn } = require('child_process');
 const connectDB = require('./config/database');
 const routes = require('./routes');
@@ -124,6 +124,7 @@ io.on('connection', (socket) => {
   console.log('Cliente Socket.IO conectado:', socket.id);
 
   let muxRelay = null;
+  let streamChunkCount = 0;
 
   // Permite que el cliente se una a una sala específica del evento si envía eventId
   socket.on('joinEventRoom', async (payload) => {
@@ -287,6 +288,16 @@ io.on('connection', (socket) => {
     const streamKey = payload?.streamKey;
     if (!eventId || !streamKey) return;
 
+    const maskedKey = typeof streamKey === 'string' && streamKey.length > 6
+      ? `${streamKey.slice(0, streamKey.length - 6)}******`
+      : '****';
+
+    console.log('Recibido start-stream', {
+      socketId: socket.id,
+      eventId,
+      streamKey: maskedKey
+    });
+
     if (muxRelay && muxRelay.proc) {
       try {
         if (muxRelay.proc.stdin.writable) {
@@ -306,8 +317,9 @@ io.on('connection', (socket) => {
       socket.data.ffmpegProcess = null;
     }
 
+    streamChunkCount = 0;
     const finalUrl = `${rtmpUrl.replace(/\/+$/, '')}/${streamKey}`;
-    const ffmpegPath = ffmpegStatic || process.env.FFMPEG_PATH || 'ffmpeg';
+    const cmd = ffmpegPath || process.env.FFMPEG_PATH || 'ffmpeg';
     const args = [
       '-re',
       '-i', '-',
@@ -321,7 +333,7 @@ io.on('connection', (socket) => {
       finalUrl,
     ];
 
-    const proc = spawn(ffmpegPath, args, { stdio: ['pipe', 'ignore', 'pipe'] });
+    const proc = spawn(cmd, args, { stdio: ['pipe', 'ignore', 'pipe'] });
     muxRelay = { eventId, proc };
     socket.data = socket.data || {};
     socket.data.ffmpegProcess = proc;
@@ -332,13 +344,20 @@ io.on('connection', (socket) => {
     } catch {}
 
     proc.stderr.on('data', (chunk) => {
-      const log = chunk.toString();
+      const text = chunk.toString();
+      console.error('FFmpeg Log:', text);
+      const log = text;
       try {
         io.to(room).emit('muxRelayLog', { eventId, log });
       } catch {}
     });
 
-    proc.on('close', (code) => {
+    proc.on('error', (err) => {
+      console.error('FFmpeg process error', { eventId, error: err.message });
+    });
+
+    proc.on('close', (code, signal) => {
+      console.error('FFmpeg process closed', { eventId, code, signal });
       const state = code === 0 ? 'closed' : 'error';
       try {
         io.to(room).emit('muxRelayState', { eventId, state });
@@ -351,7 +370,16 @@ io.on('connection', (socket) => {
     const eventId = payload?.eventId;
     const raw = payload?.chunk ?? payload?.data;
     if (!muxRelay || !muxRelay.proc || muxRelay.eventId !== eventId) return;
-    if (!raw || !muxRelay.proc.stdin.writable) return;
+    if (!muxRelay.proc.stdin.writable) return;
+    streamChunkCount += 1;
+    if (streamChunkCount % 100 === 0) {
+      console.log('Recibiendo datos de video', {
+        socketId: socket.id,
+        eventId,
+        chunks: streamChunkCount
+      });
+    }
+    if (!raw) return;
     let buf;
     if (Buffer.isBuffer(raw)) buf = raw;
     else if (raw instanceof ArrayBuffer) buf = Buffer.from(raw);
