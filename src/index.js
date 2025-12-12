@@ -330,14 +330,21 @@ io.on('connection', (socket) => {
     const finalUrl = `${rtmpUrl.replace(/\/+$/, '')}/${streamKey}`;
     const cmd = ffmpegPath || process.env.FFMPEG_PATH || 'ffmpeg';
     const args = [
-      '-re',
+      '-f', 'webm',
       '-i', '-',
+      '-map', '0:v:0',
+      '-map', '0:a:0',
       '-c:v', 'libx264',
+      '-b:v', '2500k',
+      '-maxrate', '2500k',
+      '-bufsize', '5000k',
       '-preset', 'veryfast',
-      '-tune', 'zerolatency',
+      '-g', '60',
+      '-r', '30',
       '-c:a', 'aac',
-      '-ar', '44100',
       '-b:a', '128k',
+      '-ar', '44100',
+      '-ac', '2',
       '-f', 'flv',
       finalUrl,
     ];
