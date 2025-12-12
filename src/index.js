@@ -12,8 +12,6 @@ const connectDB = require('./config/database');
 const routes = require('./routes');
 const { errorHandler, notFound } = require('./middlewares/error');
 const { setupStaticMiddleware } = require('./middlewares/static.middleware');
-const { verifyToken: verifyJwtToken } = require('./utils/jwt');
-const LiveEvent = require('./models/LiveEvent');
 
 const app = express();
 
@@ -97,170 +95,14 @@ const io = new Server(server, {
 
 // Mapa para llevar un intervalo por cada sala de evento
 const eventIntervals = new Map();
-// Mapa de relays Mux activos (socket -> ffmpeg)
-const muxRelays = new Map();
 
 // Exponer instancia de io a través de la app para usarla en controladores
 app.set('io', io);
 
-const stopMuxRelay = (eventId) => {
-  const relay = muxRelays.get(String(eventId));
-  if (!relay) return;
-  try { relay.ffmpeg?.stdin?.end(); } catch (_) {}
-  try { relay.ffmpeg?.kill('SIGINT'); } catch (_) {}
-  muxRelays.delete(String(eventId));
-};
-
 io.on('connection', (socket) => {
   console.log('Cliente Socket.IO conectado:', socket.id);
 
-  const emitMuxRelayState = (eventId, state) => {
-    try {
-      socket.emit('muxRelayState', { eventId, state });
-      io.to(`event_${eventId}`).emit('muxRelayState', { eventId, state });
-    } catch (_) {}
-  };
-
-  socket.on('muxRelay:start', async (payload, cb) => {
-    const ack = (obj) => {
-      if (typeof cb === 'function') cb(obj);
-      if (!obj?.success && payload?.eventId) emitMuxRelayState(String(payload.eventId), 'error');
-    };
-    try {
-      const eventId = String(payload?.eventId || '').trim();
-      const streamKey = String(payload?.streamKey || '').trim();
-      if (!eventId || !streamKey) return ack({ success: false, message: 'missing params' });
-      let ingestUrl = typeof payload?.ingestUrl === 'string' && payload.ingestUrl
-        ? String(payload.ingestUrl)
-        : 'rtmp://global-live.mux.com:5222/app';
-      const transport = String(payload?.transport || '').toLowerCase();
-      try {
-        const raw = ingestUrl.trim();
-        if (raw.startsWith('rtmp://') && transport !== 'rtmp') {
-          const hostPath = raw.slice('rtmp://'.length);
-          const parts = hostPath.split('/');
-          const host = parts.shift() || 'global-live.mux.com:5222';
-          const [hostname, port] = host.split(':');
-          const safePort = port && port !== '' ? port : '5222';
-          const finalPort = safePort === '5222' ? '443' : safePort;
-          ingestUrl = `rtmps://${hostname}:${finalPort}/${parts.join('/')}`;
-        }
-      } catch (_) {}
-
-      let userId = null;
-      try {
-        const decoded = verifyJwtToken(String(payload?.token || ''));
-        userId = decoded?.id || null;
-      } catch (_) {}
-      if (!userId) return ack({ success: false, message: 'auth failed' });
-
-      const event = await LiveEvent.findOne({ _id: eventId, owner: userId }).select('_id');
-      if (!event) return ack({ success: false, message: 'event not found' });
-
-      stopMuxRelay(eventId);
-
-      const dest = `${ingestUrl.replace(/\/+$/, '')}/${streamKey}`;
-      try {
-        console.info('muxRelayWS: request accepted', { eventId: String(event._id), ingestUrl, streamKeyLen: streamKey.length });
-      } catch (_) {}
-
-      const args = [
-        '-nostdin',
-        '-loglevel', 'warning',
-        '-re',
-        '-f', 'webm',
-        '-i', 'pipe:0',
-        '-fflags', '+genpts',
-        '-c:v', 'libx264',
-        '-pix_fmt', 'yuv420p',
-        '-preset', 'veryfast',
-        '-tune', 'zerolatency',
-        '-profile:v', 'baseline',
-        '-b:v', '2500k',
-        '-maxrate', '2500k',
-        '-bufsize', '5000k',
-        '-r', '30',
-        '-g', '60',
-        '-keyint_min', '60',
-        '-sc_threshold', '0',
-        '-max_interleave_delta', '0',
-        '-c:a', 'aac',
-        '-ar', '44100',
-        '-b:a', '128k',
-        '-f', 'flv',
-        '-rtmp_live', 'live',
-        dest
-      ];
-
-      const ffmpegPath = process.env.FFMPEG_PATH || ffmpegStatic || 'ffmpeg';
-      const ffmpeg = spawn(ffmpegPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
-      muxRelays.set(String(event._id), { ffmpeg, socketId: socket.id, totalBytes: 0, firstChunk: true });
-      socket.data = socket.data || {};
-      socket.data.muxRelayEventId = String(event._id);
-      emitMuxRelayState(String(event._id), 'starting');
-      ack({ success: true });
-
-      ffmpeg.on('close', (code, signal) => {
-        try {
-          console.info('muxRelayWS: ffmpeg closed', { eventId: String(event._id), code, signal });
-        } catch (_) {}
-        emitMuxRelayState(String(event._id), code === 0 ? 'closed' : 'error');
-        stopMuxRelay(event._id);
-      });
-      ffmpeg.on('error', (err) => {
-        try {
-          console.error('muxRelayWS: ffmpeg error', { eventId: String(event._id), message: err?.message });
-        } catch (_) {}
-        emitMuxRelayState(String(event._id), 'error');
-        stopMuxRelay(event._id);
-      });
-      ffmpeg.stderr.on('data', (chunk) => {
-        try {
-          const msg = chunk.toString();
-          io.to(`event_${event._id}`).emit('muxRelayLog', { eventId: String(event._id), log: msg });
-          if (/error|fail|denied|invalid|unauthorized/i.test(msg)) {
-            console.error('muxRelayWS: ffmpeg stderr', { eventId: String(event._id), msg: msg.slice(0, 200) });
-          }
-        } catch (_) {}
-      });
-    } catch (err) {
-      try {
-        console.error('muxRelayWS:start error', err?.message || err);
-      } catch (_) {}
-      ack({ success: false, message: 'internal error' });
-    }
-  });
-
-  socket.on('muxRelay:chunk', (payload) => {
-    const eventId = String(payload?.eventId || '').trim();
-    const relay = eventId ? muxRelays.get(eventId) : null;
-    if (!relay || relay.socketId !== socket.id || !payload?.chunk) return;
-    try {
-      const buf = Buffer.isBuffer(payload.chunk) ? payload.chunk : Buffer.from(payload.chunk);
-      relay.totalBytes += buf.length;
-      if (relay.firstChunk) {
-        relay.firstChunk = false;
-        emitMuxRelayState(eventId, 'streaming');
-        try { console.info('muxRelayWS: first chunk', { eventId, bytes: buf.length }); } catch (_) {}
-      }
-      const ok = relay.ffmpeg.stdin.write(buf);
-      if (ok === false) {
-        try { console.error('muxRelayWS: backpressure', { eventId }); } catch (_) {}
-      }
-    } catch (err) {
-      try { console.error('muxRelayWS: write error', { eventId, message: err?.message }); } catch (_) {}
-      emitMuxRelayState(eventId, 'error');
-      stopMuxRelay(eventId);
-    }
-  });
-
-  socket.on('muxRelay:stop', (payload) => {
-    const eventId = String(payload?.eventId || '').trim();
-    const relay = eventId ? muxRelays.get(eventId) : null;
-    if (!eventId || (relay && relay.socketId !== socket.id)) return;
-    stopMuxRelay(eventId);
-    emitMuxRelayState(eventId, 'closed');
-  });
+  let muxRelay = null;
 
   // Permite que el cliente se una a una sala específica del evento si envía eventId
   socket.on('joinEventRoom', async (payload) => {
@@ -418,8 +260,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Permite que el cliente se una a su sala personal de usuario para recibir notificaciones en tiempo real
-  // El frontend debe emitir 'joinUserRoom' con el userId después de autenticarse
   socket.on('joinUserRoom', (userId) => {
     if (userId) {
       socket.join(`user_${userId}`);
@@ -429,16 +269,98 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('muxRelayStart', (payload) => {
+    const eventId = payload?.eventId;
+    const rtmpUrl = payload?.rtmpUrl;
+    const streamKey = payload?.streamKey;
+    if (!eventId || !rtmpUrl || !streamKey) return;
+
+    if (muxRelay && muxRelay.proc) {
+      try {
+        if (muxRelay.proc.stdin.writable) {
+          muxRelay.proc.stdin.end();
+        }
+        muxRelay.proc.kill('SIGTERM');
+      } catch {}
+      muxRelay = null;
+    }
+
+    const finalUrl = `${rtmpUrl.replace(/\/+$/, '')}/${streamKey}`;
+    const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+    const args = [
+      '-re',
+      '-i', 'pipe:0',
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-tune', 'zerolatency',
+      '-c:a', 'aac',
+      '-ar', '44100',
+      '-b:a', '128k',
+      '-f', 'flv',
+      finalUrl,
+    ];
+
+    const proc = spawn(ffmpegPath, args, { stdio: ['pipe', 'ignore', 'pipe'] });
+    muxRelay = { eventId, proc };
+
+    const room = `event_${eventId}`;
+    try {
+      io.to(room).emit('muxRelayState', { eventId, state: 'starting' });
+    } catch {}
+
+    proc.stderr.on('data', (chunk) => {
+      const log = chunk.toString();
+      try {
+        io.to(room).emit('muxRelayLog', { eventId, log });
+      } catch {}
+    });
+
+    proc.on('close', (code) => {
+      const state = code === 0 ? 'closed' : 'error';
+      try {
+        io.to(room).emit('muxRelayState', { eventId, state });
+      } catch {}
+      muxRelay = null;
+    });
+  });
+
+  socket.on('muxRelayChunk', (payload) => {
+    const eventId = payload?.eventId;
+    const chunk = payload?.chunk;
+    if (!muxRelay || !muxRelay.proc || muxRelay.eventId !== eventId) return;
+    if (!chunk || !muxRelay.proc.stdin.writable) return;
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    try {
+      muxRelay.proc.stdin.write(buf);
+    } catch {}
+  });
+
+  socket.on('muxRelayStop', (payload) => {
+    const eventId = payload?.eventId;
+    if (!muxRelay || muxRelay.eventId !== eventId) return;
+    try {
+      if (muxRelay.proc.stdin.writable) {
+        muxRelay.proc.stdin.end();
+      }
+      muxRelay.proc.kill('SIGTERM');
+    } catch {}
+    muxRelay = null;
+  });
+
   socket.on('disconnect', async () => {
     console.log('Cliente Socket.IO desconectado:', socket.id);
-    if (socket.data?.muxRelayEventId) {
-      stopMuxRelay(socket.data.muxRelayEventId);
-      emitMuxRelayState(socket.data.muxRelayEventId, 'closed');
+    if (muxRelay && muxRelay.proc) {
+      try {
+        if (muxRelay.proc.stdin.writable) {
+          muxRelay.proc.stdin.end();
+        }
+        muxRelay.proc.kill('SIGTERM');
+      } catch {}
+      muxRelay = null;
     }
     const eventId = socket.data?.joinedEventId;
     if (!eventId) return;
 
-    // Obtenemos la sala y el número actual de espectadores tras la desconexión
     const room = io.sockets.adapter.rooms.get(`event_${eventId}`);
     const currentViewers = room ? room.size : 0;
     try {
@@ -450,10 +372,9 @@ io.on('connection', (socket) => {
       const metricsDoc = await LiveEventMetrics.findOne({ event: eventId });
       if (!metricsDoc) return;
 
-      // Recalcular avgConcurrentViewers si hay duración disponible
       const prevAvg = metricsDoc.avgConcurrentViewers || 0;
       const prevDuration = metricsDoc.durationSeconds || 0;
-      const newDuration = prevDuration + 1; // sumamos 1 segundo al tiempo acumulado mínimo
+      const newDuration = prevDuration + 1;
       let newAvg = prevAvg;
       if (newDuration > 0) {
         newAvg = ((prevAvg * prevDuration) + currentViewers) / newDuration;
@@ -468,13 +389,11 @@ io.on('connection', (socket) => {
 
       await LiveEventMetrics.updateOne({ event: eventId }, update);
 
-      // Emitir actualización a la sala restante si quedan espectadores
       io.to(`event_${eventId}`).emit('metricsUpdated', {
         eventId,
         metrics: { ...metricsDoc.toObject(), ...update.$set }
       });
 
-      // Si ya no hay espectadores, limpiar intervalo de la sala
       if (currentViewers === 0 && eventIntervals.has(eventId)) {
         clearInterval(eventIntervals.get(eventId));
         eventIntervals.delete(eventId);

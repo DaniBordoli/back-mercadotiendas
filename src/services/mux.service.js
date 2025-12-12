@@ -1,4 +1,5 @@
 const axios = require('axios');
+const jwt = require('jsonwebtoken');
 
 function getAuth() {
   const id = (process.env.MUX_TOKEN_ID || '').trim();
@@ -62,4 +63,31 @@ async function getLiveStream(liveStreamId) {
   return data && data.data ? data.data : data;
 }
 
-module.exports = { createLiveStream, disableLiveStream, getLiveStream };
+// Genera un token JWT para el Broadcast WebRTC de Mux.
+// Soporta Signing Keys en formato:
+//  - MUX_SIGNING_KEY_PRIVATE_KEY (PEM)  -> RS256
+//  - MUX_SIGNING_KEY_SECRET (string)    -> HS256 (fallback)
+//  - siempre requiere MUX_SIGNING_KEY_ID
+function createBroadcastToken(streamKey, { ttlSeconds = 3600 } = {}) {
+  const keyId = (process.env.MUX_SIGNING_KEY_ID || '').trim();
+  const privateKey = (process.env.MUX_SIGNING_KEY_PRIVATE_KEY || '').trim();
+  const secret = (process.env.MUX_SIGNING_KEY_SECRET || '').trim();
+  if (!keyId || (!privateKey && !secret)) {
+    throw new Error('Mux signing keys missing (MUX_SIGNING_KEY_ID + PRIVATE_KEY or SECRET)');
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    sub: streamKey,
+    aud: 'mux.live-stream',
+    exp: now + ttlSeconds,
+  };
+  if (privateKey) {
+    const pem = privateKey.includes('BEGIN RSA PRIVATE KEY') || privateKey.includes('BEGIN PRIVATE KEY')
+      ? privateKey
+      : Buffer.from(privateKey, 'base64').toString('utf8');
+    return jwt.sign(payload, pem, { algorithm: 'RS256', keyid: keyId });
+  }
+  return jwt.sign(payload, secret, { algorithm: 'HS256', keyid: keyId });
+}
+
+module.exports = { createLiveStream, disableLiveStream, getLiveStream, createBroadcastToken };

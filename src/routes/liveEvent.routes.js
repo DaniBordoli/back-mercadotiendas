@@ -81,8 +81,7 @@ router.get('/:id/viewer-series', liveEventController.getViewerSeries);
 
 // POST /api/live-events/:id/mux/setup - Crear Live Stream en Mux y devolver ingest
 router.post('/:id/mux/setup', verifyToken, isInfluencer, liveEventController.setupMuxLive);
-// POST /api/live-events/:id/mux/relay - Iniciar relay HTTP -> RTMP hacia Mux (influencer autenticado)
-// Nota: se elimina isInfluencer para permitir que el owner autenticado inicie el relay sin bloqueo de rol.
+// POST /api/live-events/:id/mux/relay - Iniciar relay HTTP -> RTMP hacia Mux (owner autenticado)
 router.post('/:id/mux/relay', verifyToken, liveEventController.startMuxRelay);
 
 // POST /api/live-events - Crear un nuevo evento en vivo (influencer autenticado)
