@@ -286,7 +286,7 @@ io.on('connection', (socket) => {
     }
 
     const finalUrl = `${rtmpUrl.replace(/\/+$/, '')}/${streamKey}`;
-    const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+    const ffmpegPath = ffmpegStatic || process.env.FFMPEG_PATH || 'ffmpeg';
     const args = [
       '-re',
       '-i', '-',
