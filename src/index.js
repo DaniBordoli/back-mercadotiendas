@@ -128,7 +128,6 @@ const eventIntervals = new Map();
 
 // Exponer instancia de io a través de la app para usarla en controladores
 app.set('io', io);
-});
 
 io.on('connection', (socket) => {
   console.log('Cliente Socket.IO conectado:', socket.id);
