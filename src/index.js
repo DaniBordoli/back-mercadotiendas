@@ -6,8 +6,9 @@ const fs = require('fs');
 const https = require('https');
 const path = require('path');
 const mongoose = require('mongoose');
+const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
-const { spawn } = require('child_process');
+const { PassThrough } = require('stream');
 const connectDB = require('./config/database');
 const routes = require('./routes');
 const { errorHandler, notFound } = require('./middlewares/error');
@@ -128,6 +129,8 @@ const eventIntervals = new Map();
 
 // Exponer instancia de io a través de la app para usarla en controladores
 app.set('io', io);
+
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 io.on('connection', (socket) => {
   console.log('Cliente Socket.IO conectado:', socket.id);
@@ -307,88 +310,85 @@ io.on('connection', (socket) => {
       streamKey: maskedKey
     });
 
-    if (muxRelay && muxRelay.proc) {
+    if (muxRelay && muxRelay.command) {
       try {
-        if (muxRelay.proc.stdin.writable) {
-          muxRelay.proc.stdin.end();
+        if (muxRelay.input && !muxRelay.input.destroyed) {
+          muxRelay.input.end();
         }
-        muxRelay.proc.kill('SIGTERM');
+        muxRelay.command.kill('SIGKILL');
       } catch {}
       muxRelay = null;
-    }
-    if (socket.data && socket.data.ffmpegProcess) {
-      try {
-        if (socket.data.ffmpegProcess.stdin.writable) {
-          socket.data.ffmpegProcess.stdin.end();
-        }
-        socket.data.ffmpegProcess.kill('SIGTERM');
-      } catch {}
-      socket.data.ffmpegProcess = null;
     }
 
     streamChunkCount = 0;
     const finalUrl = `${rtmpUrl.replace(/\/+$/, '')}/${streamKey}`;
-    const cmd = ffmpegPath || process.env.FFMPEG_PATH || 'ffmpeg';
-    const args = [
-      '-i', '-',
-      '-c:v', 'libx264',
-      '-preset', 'veryfast',
-      '-tune', 'zerolatency',
-      '-b:v', '2500k',
-      '-maxrate', '2500k',
-      '-bufsize', '5000k',
-      '-r', '30',
-      '-g', '60',
-      '-keyint_min', '60',
-      '-sc_threshold', '0',
-      '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac',
-      '-b:a', '128k',
-      '-ar', '48000',
-      '-ac', '2',
-      '-f', 'flv',
-      '-flvflags', 'no_duration_filesize',
-      finalUrl,
-    ];
+    const inputStream = new PassThrough();
 
-    const proc = spawn(cmd, args, { stdio: ['pipe', 'ignore', 'pipe'] });
-    muxRelay = { eventId, proc };
-    socket.data = socket.data || {};
-    socket.data.ffmpegProcess = proc;
+    const command = ffmpeg()
+      .input(inputStream)
+      .inputFormat('webm')
+      .outputOptions('-threads 2')
+      .videoCodec('libx264')
+      .videoBitrate('2500k')
+      .addOption('-preset', 'veryfast')
+      .addOption('-tune', 'zerolatency')
+      .addOption('-maxrate', '2500k')
+      .addOption('-bufsize', '5000k')
+      .addOption('-r', '30')
+      .addOption('-g', '60')
+      .addOption('-keyint_min', '60')
+      .addOption('-sc_threshold', '0')
+      .addOption('-pix_fmt', 'yuv420p')
+      .audioCodec('aac')
+      .audioBitrate('128k')
+      .audioChannels(2)
+      .audioFrequency(48000)
+      .format('flv')
+      .output(finalUrl);
 
     const room = `event_${eventId}`;
-    try {
-      io.to(room).emit('muxRelayState', { eventId, state: 'starting' });
-    } catch {}
 
-    proc.stderr.on('data', (chunk) => {
-      const text = chunk.toString();
-      console.error('FFmpeg Log:', text);
-      const log = text;
+    command.on('start', (cmdline) => {
+      console.log('FFmpeg start', { eventId, cmdline });
       try {
-        io.to(room).emit('muxRelayLog', { eventId, log });
+        io.to(room).emit('muxRelayState', { eventId, state: 'starting' });
       } catch {}
     });
 
-    proc.on('error', (err) => {
-      console.error('FFmpeg process error', { eventId, error: err.message });
+    command.on('stderr', (line) => {
+      console.error('FFmpeg stderr', { eventId, line });
+      try {
+        io.to(room).emit('muxRelayLog', { eventId, log: line });
+      } catch {}
     });
 
-    proc.on('close', (code, signal) => {
-      console.error('FFmpeg process closed', { eventId, code, signal });
-      const state = code === 0 ? 'closed' : 'error';
+    command.on('error', (err, stdout, stderr) => {
+      console.error('FFmpeg error', { eventId, error: err.message, stdout, stderr });
       try {
-        io.to(room).emit('muxRelayState', { eventId, state });
+        io.to(room).emit('muxRelayState', { eventId, state: 'error' });
       } catch {}
       muxRelay = null;
     });
+
+    command.on('end', () => {
+      console.log('FFmpeg end', { eventId });
+      try {
+        io.to(room).emit('muxRelayState', { eventId, state: 'closed' });
+      } catch {}
+      muxRelay = null;
+    });
+
+    muxRelay = { eventId, command, input: inputStream };
+    socket.data = socket.data || {};
+    socket.data.ffmpegCommand = command;
+
+    command.run();
   };
 
   const handleMuxRelayChunk = (payload) => {
     const eventId = payload?.eventId;
     const raw = payload?.chunk ?? payload?.data;
-    if (!muxRelay || !muxRelay.proc || muxRelay.eventId !== eventId) return;
-    if (!muxRelay.proc.stdin.writable) return;
+    if (!muxRelay || !muxRelay.input || muxRelay.eventId !== eventId) return;
     streamChunkCount += 1;
     if (streamChunkCount % 100 === 0) {
       console.log('Recibiendo datos de video', {
@@ -403,7 +403,7 @@ io.on('connection', (socket) => {
     else if (raw instanceof ArrayBuffer) buf = Buffer.from(raw);
     else buf = Buffer.from(raw);
     try {
-      muxRelay.proc.stdin.write(buf);
+      muxRelay.input.write(buf);
     } catch {}
   };
 
@@ -411,14 +411,16 @@ io.on('connection', (socket) => {
     const eventId = payload?.eventId;
     if (!muxRelay || muxRelay.eventId !== eventId) return;
     try {
-      if (muxRelay.proc.stdin.writable) {
-        muxRelay.proc.stdin.end();
+      if (muxRelay.input && !muxRelay.input.destroyed) {
+        muxRelay.input.end();
       }
-      muxRelay.proc.kill('SIGTERM');
+      if (muxRelay.command) {
+        muxRelay.command.kill('SIGKILL');
+      }
     } catch {}
     muxRelay = null;
-    if (socket.data && socket.data.ffmpegProcess) {
-      socket.data.ffmpegProcess = null;
+    if (socket.data && socket.data.ffmpegCommand) {
+      socket.data.ffmpegCommand = null;
     }
   };
 
@@ -441,12 +443,12 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', async () => {
     console.log('Cliente Socket.IO desconectado:', socket.id);
-    if (muxRelay && muxRelay.proc) {
+    if (muxRelay && muxRelay.command) {
       try {
-        if (muxRelay.proc.stdin.writable) {
-          muxRelay.proc.stdin.end();
+        if (muxRelay.input && !muxRelay.input.destroyed) {
+          muxRelay.input.end();
         }
-        muxRelay.proc.kill('SIGTERM');
+        muxRelay.command.kill('SIGKILL');
       } catch {}
       muxRelay = null;
     }
