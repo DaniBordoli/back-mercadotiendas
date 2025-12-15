@@ -34,6 +34,7 @@ router.put('/:id',
     check('campaign').optional().isMongoId(),
     check('products').optional().isArray(),
     check('socialAccounts').optional().isArray(),
+    check('previewImageUrl').optional().isString().isLength({ max: 500 }),
   ],
   (req, res) => {
     const errors = validationResult(req);
@@ -96,7 +97,8 @@ router.post('/',
     check('status').optional().isIn(['draft', 'published']),
     check('campaign').optional().isMongoId(),
     check('products').optional().isArray(),
-    check('socialAccounts').optional().isArray()
+    check('socialAccounts').optional().isArray(),
+    check('previewImageUrl').optional().isString().isLength({ max: 500 })
   ],
   (req, res) => {
     const errors = validationResult(req);

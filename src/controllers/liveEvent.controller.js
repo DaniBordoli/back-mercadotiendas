@@ -19,8 +19,7 @@ exports.createLiveEvent = async (req, res) => {
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
-    // In createLiveEvent, after destructuring req.body
-    const { title, description, date, time, status, products = [], socialAccounts = [], youtubeVideoId, campaign, platform } = req.body;
+    const { title, description, date, time, status, products = [], socialAccounts = [], youtubeVideoId, campaign, platform, previewImageUrl } = req.body;
 
     let startDateTime;
     try {
@@ -59,6 +58,7 @@ exports.createLiveEvent = async (req, res) => {
       campaign,
       youtubeVideoId,
       platform,
+      previewImageUrl: previewImageUrl || null,
     });
 
     await liveEvent.save();
@@ -591,7 +591,7 @@ exports.deleteLiveEvent = async (req, res) => {
 exports.updateLiveEvent = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, date, time, status, products, socialAccounts, youtubeVideoId, campaign } = req.body;
+    const { title, description, date, time, status, products, socialAccounts, youtubeVideoId, campaign, previewImageUrl } = req.body;
 
     // Encontrar evento perteneciente al usuario
     const event = await LiveEvent.findOne({ _id: id, owner: req.user._id });
@@ -669,6 +669,7 @@ exports.updateLiveEvent = async (req, res) => {
     if (products !== undefined) event.products = products;
     if (socialAccounts !== undefined) event.socialAccounts = socialAccounts;
     if (campaign !== undefined) event.campaign = campaign;
+    if (previewImageUrl !== undefined) event.previewImageUrl = previewImageUrl || null;
     if (youtubeVideoId !== undefined) event.youtubeVideoId = youtubeVideoId;
 
     await event.save();
