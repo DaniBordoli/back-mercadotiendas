@@ -369,7 +369,9 @@ exports.getInfluencerPublicMetrics = async (req, res) => {
       }
     }
 
-    return res.json({ success: true, data: { averageViews, engagementRate } });
+    const livesEmitted = await LiveEvent.countDocuments({ owner: id, status: 'finished' });
+
+    return res.json({ success: true, data: { averageViews, engagementRate, livesEmitted } });
   } catch (err) {
     console.error('Error obteniendo métricas públicas de influencer:', err);
     return res.status(500).json({ success: false, message: 'Error en el servidor', error: err.message });

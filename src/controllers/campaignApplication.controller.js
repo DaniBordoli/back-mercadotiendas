@@ -20,7 +20,7 @@ exports.applyToCampaign = async (req, res, next) => {
     }
     
     const { campaignId } = req.params;
-    const { message, socialMediaLinks = [], platforms = [], milestones = [], proposedFee, totalAmount } = req.body;
+    const { message, socialMediaLinks = [], milestones = [], proposedFee, totalAmount } = req.body;
 
     // Validación de hitos
     if (!Array.isArray(milestones) || milestones.length === 0) {
@@ -110,7 +110,6 @@ exports.applyToCampaign = async (req, res, next) => {
       user: req.user.id,
       message,
       socialMediaLinks,
-      platforms,
       milestones,
       proposedFee,
       totalAmount
@@ -132,8 +131,7 @@ exports.applyToCampaign = async (req, res, next) => {
           data: {
             campaignName: campaign.name || '',
             milestonesCount: Array.isArray(milestones) ? milestones.length : 0,
-            proposedFee: proposedFee || 0,
-            platforms: Array.isArray(platforms) ? platforms : []
+            proposedFee: proposedFee || 0
           }
         });
       }
@@ -284,7 +282,7 @@ exports.saveDraftApplication = async (req, res) => {
     }
 
     const { campaignId } = req.params;
-    const { message, socialMediaLinks = [], platforms = [], milestones = [], proposedFee, totalAmount } = req.body;
+    const { message, socialMediaLinks = [], milestones = [], proposedFee, totalAmount } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(campaignId)) {
       return res.status(400).json({ success: false, message: 'ID de campaña inválido' });
@@ -302,7 +300,6 @@ exports.saveDraftApplication = async (req, res) => {
       // Actualizar borrador existente
       draft.message = message;
       draft.socialMediaLinks = socialMediaLinks;
-      draft.platforms = platforms;
       draft.milestones = milestones;
       draft.proposedFee = proposedFee;
       draft.totalAmount = totalAmount;
@@ -313,7 +310,6 @@ exports.saveDraftApplication = async (req, res) => {
         user: req.user.id,
         message,
         socialMediaLinks,
-        platforms,
         milestones,
         proposedFee,
         totalAmount,

@@ -8,7 +8,6 @@ const { verifyToken } = require('../middlewares/auth');
 router.post('/campaign/:campaignId', verifyToken, [
   
   check('socialMediaLinks', 'Los enlaces de redes sociales deben ser un array').optional().isArray(),
-  check('platforms', 'Las plataformas deben ser un array').optional().isArray(),
   check('milestones', 'Los hitos deben ser un array').optional().isArray(),
   check('totalAmount', 'El monto total debe ser numérico').optional().isNumeric()
 ], (req, res) => {
@@ -37,7 +36,6 @@ router.delete('/:id', verifyToken, campaignApplicationController.deleteApplicati
 // POST /api/applications/campaign/:campaignId/draft - Guardar borrador de aplicación (requiere autenticación)
 router.post('/campaign/:campaignId/draft', verifyToken, [
   check('socialMediaLinks').optional().isArray(),
-  check('platforms').optional().isArray(),
   check('milestones').optional().isArray(),
   check('totalAmount').optional().isNumeric()
 ], (req, res) => {

@@ -29,14 +29,6 @@ const campaignApplicationSchema = new mongoose.Schema({
     }
   }],
 
-  // Plataformas seleccionadas (en caso de diferenciar de socialMediaLinks)
-  platforms: [{
-    platform: { type: String, required: true },
-    url: { type: String },
-    followers: { type: Number },
-    cost: { type: Number }
-  }],
-
   // Arreglo de hitos propuestos por el influencer
   milestones: [{
     title: { type: String, required: true },

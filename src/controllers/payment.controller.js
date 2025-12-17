@@ -91,6 +91,15 @@ const createOrderCheckout = async (req, res) => {
       };
     });
 
+    // Generar una referencia única para el pedido que se enviará a Mobbex
+    orderData.reference = `order_${Date.now()}`;
+
+    const modeHeader = (req.headers['x-payment-mode'] || '').toLowerCase();
+    const useReal = modeHeader === 'mobbex';
+    const service = useReal ? mobbexService : mockService;
+
+    let credentials = {};
+    let options = {};
     const shopTotals = new Map();
     for (const item of safeItems) {
       const prod = productMap.get(item.productId);
@@ -105,29 +114,25 @@ const createOrderCheckout = async (req, res) => {
     const distinctShopIds = Array.from(shopTotals.keys());
     const isMixedCart = distinctShopIds.length > 1;
 
-    // Generar una referencia única para el pedido que se enviará a Mobbex
-    orderData.reference = `order_${Date.now()}`;
-
-    const modeHeader = (req.headers['x-payment-mode'] || '').toLowerCase();
-    const useReal = modeHeader === 'mobbex';
-    const service = useReal ? mobbexService : mockService;
-
-    let credentials = {};
-    let options = {};
     if (isMixedCart) {
       const missingTax = Array.from(shopTotals.values()).some(v => !v.taxId);
-      if (missingTax) {
+
+      if (missingTax && useReal) {
         return errorResponse(res, 'Carrito mixto requiere CUIT configurado en todas las tiendas', 400);
       }
-      const split = distinctShopIds.map(shopId => {
-        const v = shopTotals.get(shopId);
-        return { tax_id: v.taxId, total: Number((v.total || 0).toFixed(2)), reference: shopId };
-      });
-      const sum = split.reduce((acc, s) => acc + s.total, 0);
-      orderData.total = Number(sum.toFixed(2));
-      credentials = { mobbexApiKey: process.env.MOBBEX_API_KEY, mobbexAccessToken: process.env.MOBBEX_ACCESS_TOKEN };
-      options = { split };
-    } else {
+
+      if (useReal) {
+        const split = distinctShopIds.map(shopId => {
+          const v = shopTotals.get(shopId);
+          return { tax_id: v.taxId, total: Number((v.total || 0).toFixed(2)), reference: shopId };
+        });
+        const sum = split.reduce((acc, s) => acc + s.total, 0);
+        orderData.total = Number(sum.toFixed(2));
+        credentials = { mobbexApiKey: process.env.MOBBEX_API_KEY, mobbexAccessToken: process.env.MOBBEX_ACCESS_TOKEN };
+        options = { split };
+      }
+      // En modo mock no necesitamos CUIT ni configuración de split
+    } else if (useReal) {
       const checkoutShop = products[0].shop;
       if (!checkoutShop) {
         return errorResponse(res, 'No se encontró la tienda asociada a los productos', 400);

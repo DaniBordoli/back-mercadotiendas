@@ -50,7 +50,8 @@ const allowedHeaders = [
   'X-Requested-With',
   'Cache-Control',
   'Accept',
-  'Origin'
+  'Origin',
+  'X-Payment-Mode'
 ];
 
 app.use(cors({
