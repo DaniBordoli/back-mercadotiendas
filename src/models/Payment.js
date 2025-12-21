@@ -91,6 +91,15 @@ const paymentSchema = new mongoose.Schema({
   paymentData: {
     type: Object
   },
+
+  shippingDetails: {
+    carrier: { type: String },
+    methodId: { type: String },
+    methodName: { type: String },
+    cost: { type: Number },
+    branchId: { type: String },
+    trackingNumber: { type: String }
+  },
   
   // Fecha de creación del pago
   createdAt: {

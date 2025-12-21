@@ -1,4 +1,5 @@
 const router = require('express').Router();
+const { verifyToken } = require('../middlewares/auth');
 const authRoutes = require('./auth.routes');
 const userRoutes = require('./user.routes');
 const testRoutes = require('./test.routes');
@@ -8,6 +9,7 @@ const productsRoutes = require('./products.routes');
 const categoryRoutes = require('./category.routes');
 const subcategoryRoutes = require('./subcategory.routes');
 const paymentRoutes = require('./payment.routes');
+const andreaniRoutes = require('./andreani.routes');
 const shopSingleRoutes = require('./shop.routes');
 const shopSocialRoutes = require('./shopsocial.routes');
 const shopVisitRoutes = require('./shopVisit.routes');
@@ -32,6 +34,7 @@ const contactMessageRoutes = require('./contactMessage.routes');
 const favoritesRoutes = require('./favorites.routes');
 const auditRoutes = require('./audit.routes');
 const adminRoutes = require('./admin.routes');
+const { getOrderById, updateOrderTracking } = require('../controllers/payment.controller');
 
 // Rutas de autenticación (/api/auth/*)
 router.use('/auth', authRoutes);
@@ -73,6 +76,9 @@ router.use('/subcategories', subcategoryRoutes);
 // Rutas de pagos (/api/payments/*)
 router.use('/payments', paymentRoutes);
 
+// Rutas de Andreani (/api/andreani/*)
+router.use('/andreani', andreaniRoutes);
+
 // Rutas de prueba (/api/test/*)
 router.use('/test', testRoutes);
 
@@ -113,6 +119,9 @@ router.use('/admin', adminRoutes);
 
 // Rutas de influencer (/api/users/* y /api/admin/influencer/*)
 router.use('/', influencerRoutes);
+
+router.get('/orders/:id', verifyToken, getOrderById);
+router.put('/orders/:id/tracking', verifyToken, updateOrderTracking);
 
 // Ruta de health check
 router.get('/health', (req, res) => {

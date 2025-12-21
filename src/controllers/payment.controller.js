@@ -25,7 +25,7 @@ const createOrderCheckout = async (req, res) => {
     console.log('Body completo:', JSON.stringify(req.body, null, 2));
     console.log('Usuario autenticado:', req.user);
 
-    const { orderData, customerData, items } = req.body;
+    const { orderData, customerData, items, shippingDetails } = req.body;
 
     console.log('=== BACKEND: Datos extraídos del body ===');
     console.log('orderData:', JSON.stringify(orderData, null, 2));
@@ -158,6 +158,7 @@ const createOrderCheckout = async (req, res) => {
         paymentMethod: null,
         paymentData: checkoutResponse.data,
         items: paymentItems,
+        ...(shippingDetails ? { shippingDetails } : {}),
         ...(liveEventId ? { liveEvent: liveEventId } : {})
       });
       await newPayment.save();
@@ -243,6 +244,31 @@ const getPaymentStatus = async (req, res) => {
     return successResponse(res, data, 'Estado del pago obtenido exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al verificar el estado del pago', 500, error.message);
+  }
+};
+
+const getOrderById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user && req.user.id;
+
+    if (!id) {
+      return errorResponse(res, 'El ID del pedido es requerido', 400);
+    }
+
+    if (!userId) {
+      return errorResponse(res, 'Usuario no autenticado', 401);
+    }
+
+    const payment = await Payment.findOne({ _id: id, user: userId }).lean();
+
+    if (!payment) {
+      return errorResponse(res, 'Pedido no encontrado', 404);
+    }
+
+    return successResponse(res, payment, 'Pedido obtenido exitosamente');
+  } catch (error) {
+    return errorResponse(res, 'Error al obtener el pedido', 500, error.message);
   }
 };
 
@@ -405,6 +431,57 @@ const handleWebhook = async (req, res) => {
     console.error('Error en webhook:', error);
     // Aún con error, respondemos 200 para evitar reintentos
     return res.status(200).json({ success: false, error: error.message });
+  }
+};
+
+const updateOrderTracking = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { trackingNumber } = req.body;
+    const userId = req.user && req.user.id;
+
+    if (!id) {
+      return errorResponse(res, 'El ID del pedido es requerido', 400);
+    }
+
+    if (!trackingNumber || typeof trackingNumber !== 'string') {
+      return errorResponse(res, 'trackingNumber es requerido', 400);
+    }
+
+    if (!userId) {
+      return errorResponse(res, 'Usuario no autenticado', 401);
+    }
+
+    const payment = await Payment.findById(id);
+
+    if (!payment) {
+      return errorResponse(res, 'Pedido no encontrado', 404);
+    }
+
+    const shop = await Shop.findOne({ owner: userId }).select('_id').lean();
+
+    if (!shop) {
+      return errorResponse(res, 'El usuario no tiene tienda asociada al pedido', 403);
+    }
+
+    const productIds = (await ProductModel.find({ shop: shop._id }).select('_id').lean()).map(p => String(p._id));
+    const belongsToSeller = (payment.items || []).some(it => productIds.includes(String(it.productId)));
+
+    if (!belongsToSeller) {
+      return errorResponse(res, 'No tienes permisos para actualizar este pedido', 403);
+    }
+
+    if (!payment.shippingDetails) {
+      payment.shippingDetails = {};
+    }
+
+    payment.shippingDetails.trackingNumber = trackingNumber;
+
+    await payment.save();
+
+    return successResponse(res, payment, 'Tracking del pedido actualizado exitosamente');
+  } catch (error) {
+    return errorResponse(res, 'Error al actualizar el tracking del pedido', 500, error.message);
   }
 };
 
@@ -685,5 +762,7 @@ module.exports = {
   getSellerPayments,
   getMobbexConnectUrl,
   getMobbexCredentials,
-  completeMockPayment
+  completeMockPayment,
+  getOrderById,
+  updateOrderTracking
 };
