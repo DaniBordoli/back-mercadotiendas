@@ -4,6 +4,9 @@ const { successResponse, errorResponse } = require('../utils/response');
 const cloudinaryService = require('../services/cloudinary.service');
 const multer = require('multer');
 const AuditLog = require('../models/AuditLog');
+const crypto = require('crypto');
+const axios = require('axios');
+const querystring = require('querystring');
 
 // Configurar multer para manejar la carga de archivos en memoria
 const upload = multer({
@@ -36,6 +39,36 @@ const deepMerge = (target, source) => {
     }
   }
   return target;
+};
+
+const buildMpState = (shopId, userId) => {
+  const secret = process.env.MP_STATE_SECRET || process.env.JWT_SECRET || '';
+  const payloadObj = { shopId: String(shopId), userId: String(userId), ts: Date.now() };
+  const payload = JSON.stringify(payloadObj);
+  if (!secret) {
+    return Buffer.from(JSON.stringify({ payload })).toString('base64url');
+  }
+  const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+  const wrapper = { payload, sig };
+  return Buffer.from(JSON.stringify(wrapper)).toString('base64url');
+};
+
+const parseMpState = (state) => {
+  if (!state) return null;
+  try {
+    const decoded = Buffer.from(state, 'base64url').toString('utf8');
+    const parsed = JSON.parse(decoded);
+    if (parsed && parsed.payload && parsed.sig) {
+      const secret = process.env.MP_STATE_SECRET || process.env.JWT_SECRET || '';
+      if (!secret) return null;
+      const expectedSig = crypto.createHmac('sha256', secret).update(parsed.payload).digest('hex');
+      if (expectedSig !== parsed.sig) return null;
+      return JSON.parse(parsed.payload);
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
 };
 
 exports.createShop = async (req, res) => {
@@ -671,7 +704,6 @@ exports.getShopTemplate = async (req, res) => {
   }
 };
 
-// Actualizar credenciales de Mobbex para una tienda
 exports.updateMobbexCredentials = async (req, res) => {
   try {
     const { id } = req.params;
@@ -686,7 +718,6 @@ exports.updateMobbexCredentials = async (req, res) => {
       return errorResponse(res, 'Tienda no encontrada', 404);
     }
 
-    // Solo el dueño puede actualizar sus credenciales
     if (shop.owner.toString() !== req.user.id) {
       return errorResponse(res, 'No autorizado para modificar esta tienda', 403);
     }
@@ -702,6 +733,188 @@ exports.updateMobbexCredentials = async (req, res) => {
   } catch (err) {
     console.error('Error al actualizar credenciales de Mobbex:', err);
     return errorResponse(res, 'Error interno al actualizar credenciales de Mobbex', 500);
+  }
+};
+
+exports.getMercadoPagoConnectUrl = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user && req.user.id;
+
+    if (!id || !userId) {
+      return errorResponse(res, 'Faltan datos de tienda o usuario', 400);
+    }
+
+    const shop = await Shop.findById(id);
+    if (!shop) {
+      return errorResponse(res, 'Tienda no encontrada', 404);
+    }
+
+    if (shop.owner.toString() !== String(userId)) {
+      return errorResponse(res, 'No autorizado para modificar esta tienda', 403);
+    }
+
+    const clientId = process.env.MP_CLIENT_ID;
+    const redirectUri = process.env.MP_REDIRECT_URI;
+
+    if (!clientId || !redirectUri) {
+      return errorResponse(res, 'Configuración de Mercado Pago incompleta', 500);
+    }
+
+    const state = buildMpState(shop._id, userId);
+
+    const params = querystring.stringify({
+      client_id: clientId,
+      response_type: 'code',
+      platform_id: 'mp',
+      redirect_uri: redirectUri,
+      state
+    });
+
+    const url = `https://auth.mercadopago.com/authorization?${params}`;
+
+    return successResponse(res, { connectUrl: url });
+  } catch (err) {
+    console.error('Error al generar URL de conexión de Mercado Pago:', err);
+    return errorResponse(res, 'Error interno al generar URL de conexión de Mercado Pago', 500);
+  }
+};
+
+exports.handleMercadoPagoCallback = async (req, res) => {
+  try {
+    const { code, state } = req.query;
+
+    if (!code || !state) {
+      return errorResponse(res, 'Parámetros inválidos en callback de Mercado Pago', 400);
+    }
+
+    const parsedState = parseMpState(String(state));
+    if (!parsedState || !parsedState.shopId || !parsedState.userId) {
+      return errorResponse(res, 'State inválido en callback de Mercado Pago', 400);
+    }
+
+    const clientId = process.env.MP_CLIENT_ID;
+    const clientSecret = process.env.MP_CLIENT_SECRET;
+    const redirectUri = process.env.MP_REDIRECT_URI;
+
+    if (!clientId || !clientSecret || !redirectUri) {
+      return errorResponse(res, 'Configuración de Mercado Pago incompleta', 500);
+    }
+
+    const shop = await Shop.findById(parsedState.shopId);
+    if (!shop) {
+      return errorResponse(res, 'Tienda no encontrada', 404);
+    }
+
+    if (shop.owner.toString() !== String(parsedState.userId)) {
+      return errorResponse(res, 'No autorizado para modificar esta tienda', 403);
+    }
+
+    const tokenUrl = 'https://api.mercadopago.com/oauth/token';
+    const body = querystring.stringify({
+      grant_type: 'authorization_code',
+      client_id: clientId,
+      client_secret: clientSecret,
+      code: String(code),
+      redirect_uri: redirectUri
+    });
+
+    const tokenResponse = await axios.post(tokenUrl, body, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    });
+
+    const data = tokenResponse && tokenResponse.data ? tokenResponse.data : null;
+    if (!data || !data.access_token) {
+      return errorResponse(res, 'No se pudieron obtener credenciales de Mercado Pago', 500);
+    }
+
+    shop.mpUserId = data.user_id ? String(data.user_id) : shop.mpUserId;
+    shop.mpAccessToken = data.access_token || shop.mpAccessToken;
+    shop.mpRefreshToken = data.refresh_token || shop.mpRefreshToken;
+    shop.mpLiveMode = typeof data.live_mode === 'boolean' ? data.live_mode : shop.mpLiveMode;
+    shop.mpPublicKey = data.public_key || shop.mpPublicKey;
+    shop.mpLastOauthUpdate = new Date();
+
+    await shop.save();
+
+    const frontendBase = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const redirectTarget = `${String(frontendBase).replace(/\/+$/, '')}/configuracion?mp_status=connected`;
+
+    return res.redirect(302, redirectTarget);
+  } catch (err) {
+    console.error('Error en callback de Mercado Pago:', err);
+    const frontendBase = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const redirectTarget = `${String(frontendBase).replace(/\/+$/, '')}/configuracion?mp_status=error`;
+    return res.redirect(302, redirectTarget);
+  }
+};
+
+exports.getMercadoPagoCredentials = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user && req.user.id;
+
+    if (!id || !userId) {
+      return errorResponse(res, 'Faltan datos de tienda o usuario', 400);
+    }
+
+    const shop = await Shop.findById(id);
+    if (!shop) {
+      return errorResponse(res, 'Tienda no encontrada', 404);
+    }
+
+    if (shop.owner.toString() !== String(userId)) {
+      return errorResponse(res, 'No autorizado para ver esta tienda', 403);
+    }
+
+    const connected = !!shop.mpAccessToken;
+
+    return successResponse(res, {
+      connected,
+      userId: shop.mpUserId,
+      liveMode: shop.mpLiveMode,
+      publicKey: shop.mpPublicKey,
+      lastUpdatedAt: shop.mpLastOauthUpdate
+    });
+  } catch (err) {
+    console.error('Error al obtener credenciales de Mercado Pago:', err);
+    return errorResponse(res, 'Error interno al obtener credenciales de Mercado Pago', 500);
+  }
+};
+
+exports.deleteMercadoPagoCredentials = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user && req.user.id;
+
+    if (!id || !userId) {
+      return errorResponse(res, 'Faltan datos de tienda o usuario', 400);
+    }
+
+    const shop = await Shop.findById(id);
+    if (!shop) {
+      return errorResponse(res, 'Tienda no encontrada', 404);
+    }
+
+    if (shop.owner.toString() !== String(userId)) {
+      return errorResponse(res, 'No autorizado para modificar esta tienda', 403);
+    }
+
+    shop.mpUserId = null;
+    shop.mpAccessToken = null;
+    shop.mpRefreshToken = null;
+    shop.mpLiveMode = false;
+    shop.mpPublicKey = null;
+    shop.mpLastOauthUpdate = null;
+
+    await shop.save();
+
+    return successResponse(res, { message: 'Credenciales de Mercado Pago eliminadas correctamente' });
+  } catch (err) {
+    console.error('Error al eliminar credenciales de Mercado Pago:', err);
+    return errorResponse(res, 'Error interno al eliminar credenciales de Mercado Pago', 500);
   }
 };
 
@@ -791,8 +1004,9 @@ exports.listAdminShops = async (req, res) => {
   try {
     const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
     const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit || '20'), 10)));
-    const status = typeof req.query.status === 'string' ? req.query.status : undefined; // active|inactive
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
     const ownerEmail = typeof req.query.ownerEmail === 'string' ? req.query.ownerEmail : undefined;
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
 
     const filter = {};
     if (status === 'active') filter.active = true;
@@ -802,7 +1016,28 @@ exports.listAdminShops = async (req, res) => {
       const owners = await User.find({ email: ownerEmail }).select('_id').lean();
       const ownerIds = owners.map(o => o._id);
       if (ownerIds.length) filter.owner = { $in: ownerIds };
-      else filter.owner = { $in: [] }; // fuerza cero resultados
+      else filter.owner = { $in: [] };
+    }
+
+    if (search) {
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, 'i');
+
+      const owners = await User.find({
+        $or: [
+          { name: regex },
+          { fullName: regex },
+          { email: regex }
+        ]
+      }).select('_id').lean();
+      const ownerIds = owners.map(o => o._id);
+
+      const orConditions = [{ name: regex }];
+      if (ownerIds.length) {
+        orConditions.push({ owner: { $in: ownerIds } });
+      }
+
+      filter.$or = orConditions;
     }
 
     const total = await Shop.countDocuments(filter);

@@ -98,7 +98,7 @@ const userSchema = new mongoose.Schema({
   },
   userType: {
     type: [String],
-    enum: ['buyer', 'seller', 'influencer', 'admin'],
+    enum: ['buyer', 'seller', 'influencer', 'admin', 'moderator'],
     default: ['buyer']
   },
   // Perfil de vendedor

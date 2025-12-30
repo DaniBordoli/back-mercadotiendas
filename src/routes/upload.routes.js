@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const { uploadCampaignImage, uploadLiveEventImage } = require('../controllers/upload.controller');
+const { uploadCampaignImage, uploadLiveEventImage, uploadCategoryImage } = require('../controllers/upload.controller');
 const { verifyToken } = require('../middlewares/auth');
 // TODO: Implementar middleware de propietario de tienda
 
@@ -27,6 +27,13 @@ router.post(
   verifyToken,
   upload.single('image'),
   uploadLiveEventImage
+);
+
+router.post(
+  '/categories',
+  verifyToken,
+  upload.single('image'),
+  uploadCategoryImage
 );
 
 module.exports = router;

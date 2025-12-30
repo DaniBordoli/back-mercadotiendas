@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('../middlewares/auth');
 const requireAdmin = require('../middlewares/admin');
+const requireModerator = require('../middlewares/moderator');
 const { validateRequest } = require('../middlewares/validate');
 
 const {
@@ -17,7 +18,8 @@ const {
   updateUserStatusAdmin,
   setupTwoFactor,
   verifyTwoFactor,
-  disableTwoFactor
+  disableTwoFactor,
+  listModeratorsForSupport
 } = require('../controllers/user.controller');
 
 /**
@@ -82,6 +84,9 @@ router.get('/admin/summary', verifyToken, requireAdmin, getAdminUsersSummary);
 router.get('/admin', verifyToken, requireAdmin, listAdminUsers);
 router.patch('/admin/:id/userType', verifyToken, requireAdmin, updateUserTypeAdmin);
 router.patch('/admin/:id/status', verifyToken, requireAdmin, updateUserStatusAdmin);
+
+// Listado resumido de moderadores (admin o moderador)
+router.get('/moderators', verifyToken, requireModerator, listModeratorsForSupport);
 
 router.post('/2fa/setup', verifyToken, setupTwoFactor);
 router.post('/2fa/verify', verifyToken, validateRequest('verifyTwoFactor'), verifyTwoFactor);

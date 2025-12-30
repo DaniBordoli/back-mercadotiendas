@@ -8,6 +8,13 @@ const requireAdmin = require('../middlewares/admin');
 // GET /api/campaigns - Obtener todas las campañas
 router.get('/', campaignController.getAllCampaigns);
 
+// GET /api/campaigns/admin/summary - Resumen de campañas (admin)
+router.get('/admin/summary', verifyToken, requireAdmin, campaignController.getAdminCampaignsSummary);
+
+// Administración de campañas (admin)
+router.get('/admin', verifyToken, requireAdmin, campaignController.listAdminCampaigns);
+router.patch('/admin/:id/state', verifyToken, requireAdmin, campaignController.updateCampaignStateAdmin);
+
 // GET /api/campaigns/:id - Obtener una campaña por ID
 router.get('/:id', campaignController.getCampaignById);
 
@@ -45,12 +52,5 @@ router.patch('/:id/status', verifyToken, campaignController.updateCampaignStatus
 
 // POST /api/campaigns/:id/invite - Invitar a influencer a campaña
 router.post('/:id/invite', verifyToken, campaignController.inviteInfluencer);
-
-// GET /api/campaigns/admin/summary - Resumen de campañas (admin)
-router.get('/admin/summary', verifyToken, requireAdmin, campaignController.getAdminCampaignsSummary);
-
-// Administración de campañas (admin)
-router.get('/admin', verifyToken, requireAdmin, campaignController.listAdminCampaigns);
-router.patch('/admin/:id/state', verifyToken, requireAdmin, campaignController.updateCampaignStateAdmin);
 
 module.exports = router;

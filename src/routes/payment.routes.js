@@ -1,10 +1,14 @@
 const router = require('express').Router();
 const { validateRequest } = require('../middlewares/validate');
 const { verifyToken } = require('../middlewares/auth');
+const { successResponse, errorResponse } = require('../utils/response');
+const SystemConfig = require('../models/SystemConfig');
 const {
   createOrderCheckout,
   getPaymentStatus,
   handleWebhook,
+  createMercadoPagoCheckout,
+  handleMercadoPagoWebhook,
   getUserPayments,
   getSellerPayments,
   getMobbexConnectUrl,
@@ -12,12 +16,40 @@ const {
   completeMockPayment
 } = require('../controllers/payment.controller');
 
+router.get('/config', async (req, res) => {
+  try {
+    const cfg = await SystemConfig.findOne({}).lean();
+    const gateways = (cfg && cfg.paymentGateways) || {};
+    const mobbexCfg = gateways.mobbex;
+    const mpCfg = gateways.mercadopago;
+
+    const mobbexEnabled = !mobbexCfg || typeof mobbexCfg !== 'object' || mobbexCfg.enabled !== false;
+    const mercadopagoEnabled = !mpCfg || typeof mpCfg !== 'object' || mpCfg.enabled !== false;
+
+    const publicConfig = {
+      mobbex: { enabled: mobbexEnabled },
+      mercadopago: { enabled: mercadopagoEnabled }
+    };
+
+    return successResponse(res, publicConfig, 'Configuración de métodos de pago obtenida exitosamente');
+  } catch (error) {
+    return errorResponse(res, 'Error al obtener configuración de métodos de pago', 500, error.message);
+  }
+});
+
 /**
  * @route POST /api/payments/checkout
  * @desc Crear un checkout para un pedido
  * @access Private
  */
 router.post('/checkout', verifyToken, validateRequest('createCheckout'), createOrderCheckout);
+
+/**
+ * @route POST /api/payments/mercadopago/checkout
+ * @desc Crear preferencias de pago de Mercado Pago para un carrito (multitienda)
+ * @access Private
+ */
+router.post('/mercadopago/checkout', verifyToken, validateRequest('createCheckout'), createMercadoPagoCheckout);
 
 /**
  * @route GET /api/payments/status/:id
@@ -67,5 +99,12 @@ router.post('/mock-complete/:paymentId', completeMockPayment);
  * @access Public
  */
 router.post('/webhook', handleWebhook);
+
+/**
+ * @route POST /api/payments/mercadopago/webhook
+ * @desc Endpoint para recibir webhooks de Mercado Pago
+ * @access Public
+ */
+router.post('/mercadopago/webhook', handleMercadoPagoWebhook);
 
 module.exports = router;

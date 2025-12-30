@@ -16,9 +16,13 @@ const disputeSchema = new mongoose.Schema(
     motivoClave: { type: String, required: true },
     descripcionInicial: { type: String, required: true },
     estado: { type: String, enum: ['open','in_review','awaiting_party_a','awaiting_party_b','proposal','resolved','closed_expired','rejected','escalated'], default: 'open' },
+    proposalBuyerStatus: { type: String, enum: ['pending','accepted','rejected'], default: 'pending' },
+    proposalSellerStatus: { type: String, enum: ['pending','accepted','rejected'], default: 'pending' },
     slaHoras: { type: Number, default: 72 },
     vencimientoActual: { type: Date },
     cierreTipo: { type: String },
+    moderatorKey: { type: String },
+    moderatorAssignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true }
 );

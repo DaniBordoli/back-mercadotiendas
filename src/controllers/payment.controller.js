@@ -1,17 +1,18 @@
 const mobbexService = require('../services/mobbex.service');
 const mockService = require('../services/mock-payment.service');
+const mercadopagoService = require('../services/mercadopago.service');
 const { successResponse, errorResponse } = require('../utils/response');
 const Payment = require('../models/Payment');
 const Shop = require('../models/Shop');
-const { updateProductStock } = require('./product.controller'); // Importar la función de stock
+const { updateProductStock } = require('./product.controller');
 const NotificationService = require('../services/notification.service');
 const { NotificationTypes } = require('../constants/notificationTypes');
 const ProductModel = require('../models/Products');
 const axios = require('axios');
-// const mobbexConfig = require('../config/mobbex'); // No necesario para mock
 const LiveEventMetrics = require('../models/LiveEventMetrics');
 const LiveEventProductMetrics = require('../models/LiveEventProductMetrics');
 const { emitNotification } = require('../utils/notification');
+const SystemConfig = require('../models/SystemConfig');
 
 /**
  * Crea un checkout para un pedido
@@ -96,6 +97,17 @@ const createOrderCheckout = async (req, res) => {
 
     const modeHeader = (req.headers['x-payment-mode'] || '').toLowerCase();
     const useReal = modeHeader === 'mobbex';
+
+    if (useReal) {
+      const cfg = await SystemConfig.findOne({}).lean();
+      const gateways = (cfg && cfg.paymentGateways) || {};
+      const gw = gateways.mobbex;
+      const enabled = !gw || typeof gw !== 'object' || gw.enabled !== false;
+      if (!enabled) {
+        return errorResponse(res, 'Mobbex está desactivado temporalmente', 400);
+      }
+    }
+
     const service = useReal ? mobbexService : mockService;
 
     let credentials = {};
@@ -208,6 +220,361 @@ const createOrderCheckout = async (req, res) => {
     
     // Cambiado: Pasar el mensaje de error original para depuración
     return errorResponse(res, 'Error al crear el checkout', 500, error.message);
+  }
+};
+
+const handleMercadoPagoWebhook = async (req, res) => {
+  try {
+    const body = req.body || {};
+    const query = req.query || {};
+
+    const topic = body.type || body.action || query.topic || query.type;
+
+    let paymentId = null;
+
+    if (body.data && (body.data.id || body.data.payment_id)) {
+      paymentId = body.data.id || body.data.payment_id;
+    }
+
+    if (!paymentId && body.resource) {
+      const parts = String(body.resource).split('/');
+      paymentId = parts[parts.length - 1] || null;
+    }
+
+    if (!paymentId && query.id) {
+      paymentId = query.id;
+    }
+
+    if (!paymentId) {
+      console.warn('Webhook Mercado Pago sin paymentId válido', JSON.stringify({ body, query }));
+      return res.status(200).json({ success: true, message: 'Webhook Mercado Pago sin paymentId' });
+    }
+
+    let statusInfo;
+    try {
+      statusInfo = await mercadopagoService.getPaymentStatus(paymentId);
+    } catch (err) {
+      console.error('Error al consultar estado en Mercado Pago:', err);
+      return res.status(200).json({ success: false, message: 'Error consultando estado en Mercado Pago' });
+    }
+
+    const reference = statusInfo.reference;
+    if (!reference) {
+      console.warn('Webhook Mercado Pago sin referencia externa en el pago', statusInfo);
+      return res.status(200).json({ success: true, message: 'Webhook Mercado Pago sin referencia' });
+    }
+
+    let payment = await Payment.findOne({ reference });
+
+    if (!payment) {
+      console.warn('Webhook Mercado Pago para pago no encontrado en DB local. reference:', reference, 'paymentId:', paymentId);
+      return res.status(200).json({ success: true, message: 'Pago Mercado Pago no encontrado localmente' });
+    }
+
+    if (payment.status && payment.status.code === 'approved' && statusInfo.status && statusInfo.status.code === 'approved') {
+      return res.status(200).json({ success: true, message: 'Pago Mercado Pago ya procesado' });
+    }
+
+    if (!payment.user) {
+      console.warn('Webhook Mercado Pago recibido para un pago sin usuario asociado. Ignorando webhook. PaymentId:', payment._id);
+      return res.status(200).json({ success: true, message: 'Webhook Mercado Pago ignorado - pago sin usuario' });
+    }
+
+    payment.mpPaymentId = statusInfo.id;
+    payment.mpStatus = statusInfo.status.code;
+    payment.mpStatusDetail = statusInfo.status.text;
+    if (statusInfo.payerEmail) {
+      payment.mpPayerEmail = statusInfo.payerEmail;
+    }
+    payment.mpRaw = statusInfo.raw;
+    if (!payment.amount && typeof statusInfo.amount === 'number') {
+      payment.amount = statusInfo.amount;
+    }
+    if (!payment.currency && statusInfo.currency) {
+      payment.currency = statusInfo.currency;
+    }
+    payment.status = {
+      code: statusInfo.status.code,
+      text: statusInfo.status.text || 'Estado actualizado desde Mercado Pago',
+    };
+    payment.paymentMethod = {
+      provider: 'mercadopago',
+      method: statusInfo.paymentMethod || null,
+    };
+    payment.updatedAt = new Date();
+
+    await payment.save();
+
+    const isApproved = statusInfo.status.code === 'approved';
+
+    if (isApproved && payment.liveEvent) {
+      LiveEventMetrics.updateOne(
+        { event: payment.liveEvent },
+        {
+          $inc: {
+            purchases: 1,
+            salesAmount: payment.amount || 0,
+          },
+        },
+        { upsert: true }
+      ).catch(console.error);
+
+      try {
+        for (const item of payment.items) {
+          const quantity = item.quantity || 1;
+          const unitPrice = item.unitPrice || item.price || 0;
+          await LiveEventProductMetrics.updateOne(
+            { event: payment.liveEvent, product: item.productId },
+            {
+              $inc: {
+                purchases: quantity,
+                revenue: unitPrice * quantity,
+              },
+            },
+            { upsert: true }
+          );
+        }
+
+        const io = req.app.get('io');
+        if (io) {
+          const productMetrics = await LiveEventProductMetrics.find({ event: payment.liveEvent }).populate('product', 'nombre precio productImages');
+          io.to(`event_${payment.liveEvent}`).emit('productMetricsUpdated', {
+            eventId: payment.liveEvent,
+            metrics: productMetrics,
+          });
+        }
+      } catch (e) {
+        console.warn('No se pudieron actualizar/emitar métricas de productos para Mercado Pago', e.message);
+      }
+    }
+
+    if (isApproved) {
+      for (const item of payment.items) {
+        await updateProductStock(item.productId, item.quantity);
+      }
+
+      try {
+        const io = req.app.get('io');
+        if (io) {
+          await NotificationService.emitAndPersist(io, {
+            users: [payment.user],
+            type: NotificationTypes.PAYMENT,
+            title: 'Pago aprobado',
+            message: `Tu pago para la orden ${payment.reference} ha sido acreditado exitosamente`,
+            entity: payment._id,
+            data: {
+              reference: payment.reference,
+              amount: payment.amount,
+              items: (payment.items || []).map((i) => ({
+                productName: i.productName,
+                quantity: i.quantity,
+                shopName: i.shopName,
+              })),
+            },
+          });
+
+          const productIdsInPayment = (payment.items || []).map((i) => i.productId).filter(Boolean);
+          const prods = await ProductModel.find({ _id: { $in: productIdsInPayment } }).populate('shop', 'owner');
+          const sellerIds = Array.from(
+            new Set(prods.map((p) => (p && p.shop && p.shop.owner ? p.shop.owner.toString() : '')).filter(Boolean))
+          );
+          if (sellerIds.length) {
+            await NotificationService.emitAndPersist(io, {
+              users: sellerIds,
+              type: NotificationTypes.PAYMENT,
+              title: 'Pago recibido',
+              message: `Has recibido un pago por la orden ${payment.reference}`,
+              entity: payment._id,
+              data: {
+                reference: payment.reference,
+                amount: payment.amount,
+                items: (payment.items || []).map((i) => ({
+                  productName: i.productName,
+                  quantity: i.quantity,
+                  shopName: i.shopName,
+                })),
+              },
+            });
+          }
+        }
+      } catch (notifErr) {
+        console.error('Error al emitir notificación de pago aprobado de Mercado Pago:', notifErr);
+      }
+    }
+
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('Error en webhook de Mercado Pago:', error);
+    return res.status(200).json({ success: false, error: error.message });
+  }
+};
+
+const createMercadoPagoCheckout = async (req, res) => {
+  try {
+    const { orderData, customerData, items, shippingDetails } = req.body;
+    const userId = req.user && (req.user.id || req.user._id) ? (req.user.id || req.user._id) : null;
+
+    if (!orderData || !orderData.total) {
+      return errorResponse(res, 'El monto total es requerido', 400);
+    }
+
+    if (!customerData || !customerData.email) {
+      return errorResponse(res, 'El email del cliente es requerido', 400);
+    }
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return errorResponse(res, 'Se requiere al menos un item en el pedido', 400);
+    }
+
+    const cfg = await SystemConfig.findOne({}).lean();
+    const gateways = (cfg && cfg.paymentGateways) || {};
+    const mpCfg = gateways.mercadopago;
+    const mpEnabled = !mpCfg || typeof mpCfg !== 'object' || mpCfg.enabled !== false;
+    if (!mpEnabled) {
+      return errorResponse(res, 'Mercado Pago está desactivado temporalmente', 400);
+    }
+
+    const normalizeProductId = (pid) => String(pid || '').split('::')[0];
+    const safeItems = (items || []).map((it) => ({
+      ...it,
+      productId: normalizeProductId(it.productId),
+    }));
+
+    const objectIdRegex = /^[0-9a-fA-F]{24}$/;
+    const productIds = safeItems.map((item) => item.productId);
+    const invalidIds = productIds.filter((id) => !objectIdRegex.test(String(id)));
+    if (invalidIds.length > 0) {
+      return errorResponse(res, 'ID de producto inválido en items del pedido', 400);
+    }
+
+    const products = await ProductModel
+      .find({ _id: { $in: productIds } })
+      .populate('shop', 'name owner mpAccessToken mpUserId mpLiveMode');
+
+    if (!products || products.length === 0) {
+      return errorResponse(res, 'No se encontraron los productos especificados', 400);
+    }
+
+    const productMap = new Map();
+    products.forEach((product) => {
+      productMap.set(product._id.toString(), product);
+    });
+
+    const shopsMap = new Map();
+    for (const item of safeItems) {
+      const prod = productMap.get(item.productId);
+      if (!prod || !prod.shop) {
+        return errorResponse(res, 'Producto sin tienda asociada', 400);
+      }
+      const shop = prod.shop;
+      const shopId = shop._id.toString();
+      const entry = shopsMap.get(shopId) || { shop, items: [], total: 0 };
+      entry.items.push({
+        name: item.name,
+        description: item.description,
+        quantity: item.quantity,
+        price: item.price,
+        image: item.image,
+        productId: item.productId,
+      });
+      entry.total += (item.price || 0) * (item.quantity || 1);
+      shopsMap.set(shopId, entry);
+    }
+
+    const shopsWithoutMp = Array.from(shopsMap.values()).filter((entry) => !entry.shop.mpAccessToken);
+    if (shopsWithoutMp.length > 0) {
+      const names = shopsWithoutMp.map((entry) => entry.shop.name || 'Tienda').join(', ');
+      return errorResponse(
+        res,
+        `Todas las tiendas del carrito deben tener Mercado Pago configurado. Faltan: ${names}`,
+        400
+      );
+    }
+
+    const baseReference = orderData.reference || `order_${Date.now()}`;
+    orderData.reference = baseReference;
+
+    const preferences = [];
+
+    const liveEventId = req.body && req.body.liveEventId ? req.body.liveEventId : null;
+
+    for (const [shopId, entry] of shopsMap.entries()) {
+      const shop = entry.shop;
+      const shopTotal = Number((entry.total || 0).toFixed(2));
+      const perShopOrderData = {
+        total: shopTotal,
+        description: orderData.description,
+        reference: `${baseReference}_${shopId}`,
+        currency: orderData.currency || 'ARS',
+      };
+
+      const externalReference = `${baseReference}::${shopId}`;
+
+      const pref = await mercadopagoService.createPreference(
+        {
+          orderData: perShopOrderData,
+          customerData,
+          items: entry.items,
+          shippingDetails,
+          externalReference,
+        },
+        { mpAccessToken: shop.mpAccessToken }
+      );
+
+      const paymentItems = entry.items.map((item) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: item.price,
+        productName: item.name,
+        productImage: item.image,
+        shopName: shop.name,
+      }));
+
+      if (userId) {
+        const payment = new Payment({
+          user: userId,
+          reference: externalReference,
+          amount: shopTotal,
+          currency: orderData.currency || 'ARS',
+          provider: 'mercadopago',
+          shop: shop._id,
+          globalOrderId: baseReference,
+          mpPreferenceId: pref.preferenceId,
+          mpStatus: 'pending',
+          mpStatusDetail: 'Checkout creado',
+          mpPayerEmail: customerData && customerData.email ? customerData.email : undefined,
+          status: { code: 'pending', text: 'Checkout creado (Mercado Pago)' },
+          paymentMethod: { provider: 'mercadopago' },
+          paymentData: {
+            preferenceId: pref.preferenceId,
+            initPoint: pref.initPoint,
+            sandboxInitPoint: pref.sandboxInitPoint,
+          },
+          items: paymentItems,
+          ...(shippingDetails ? { shippingDetails } : {}),
+          ...(liveEventId ? { liveEvent: liveEventId } : {}),
+        });
+        await payment.save();
+      }
+
+      preferences.push({
+        shopId,
+        shopName: shop.name,
+        preferenceId: pref.preferenceId,
+        initPoint: pref.initPoint,
+        sandboxInitPoint: pref.sandboxInitPoint,
+      });
+    }
+
+    const payload = {
+      preferences,
+      globalReference: baseReference,
+    };
+
+    return successResponse(res, payload, 'Preferencias de Mercado Pago creadas exitosamente');
+  } catch (error) {
+    console.error('Error en createMercadoPagoCheckout:', error);
+    return errorResponse(res, 'Error al crear checkout de Mercado Pago', 500, error.message);
   }
 };
 
@@ -758,6 +1125,8 @@ module.exports = {
   createOrderCheckout,
   getPaymentStatus,
   handleWebhook,
+  createMercadoPagoCheckout,
+  handleMercadoPagoWebhook,
   getUserPayments,
   getSellerPayments,
   getMobbexConnectUrl,

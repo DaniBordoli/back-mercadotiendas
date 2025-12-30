@@ -8,26 +8,20 @@ const paymentSchema = new mongoose.Schema({
     required: true
   },
   
-  // Datos de la operación de Mobbex
   mobbexId: {
     type: String,
-    required: true,
-    unique: true
   },
   
-  // Referencia interna (por ejemplo, número de orden)
   reference: {
     type: String,
     required: true
   },
   
-  // Monto total del pago
   amount: {
     type: Number,
     required: true
   },
   
-  // Esquema de los ítems comprados
   items: [{
     productId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -47,16 +41,15 @@ const paymentSchema = new mongoose.Schema({
       type: String,
       required: true
     },
-    productImage: { // URL de la imagen principal del producto
+    productImage: {
       type: String
     },
-    shopName: { // Nombre de la tienda a la que pertenece el producto
+    shopName: {
       type: String,
       required: true
     }
   }],
-  
-  // Evento en vivo asociado (opcional)
+
   liveEvent: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'LiveEvent',
@@ -64,13 +57,49 @@ const paymentSchema = new mongoose.Schema({
     index: true
   },
   
-  // Moneda del pago
   currency: {
     type: String,
     default: 'ARS'
   },
-  
-  // Estado del pago
+
+  provider: {
+    type: String,
+    default: 'mobbex',
+    index: true
+  },
+
+  shop: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Shop',
+    required: false,
+    index: true
+  },
+
+  globalOrderId: {
+    type: String
+  },
+
+  mpPaymentId: {
+    type: String,
+    index: true
+  },
+  mpPreferenceId: {
+    type: String,
+    index: true
+  },
+  mpStatus: {
+    type: String
+  },
+  mpStatusDetail: {
+    type: String
+  },
+  mpPayerEmail: {
+    type: String
+  },
+  mpRaw: {
+    type: Object
+  },
+
   status: {
     code: {
       type: String,
@@ -82,12 +111,10 @@ const paymentSchema = new mongoose.Schema({
     }
   },
   
-  // Método de pago utilizado
   paymentMethod: {
     type: Object
   },
   
-  // Datos adicionales del pago (como cuotas, etc.)
   paymentData: {
     type: Object
   },
@@ -101,13 +128,11 @@ const paymentSchema = new mongoose.Schema({
     trackingNumber: { type: String }
   },
   
-  // Fecha de creación del pago
   createdAt: {
     type: Date,
     default: Date.now
   },
   
-  // Fecha de actualización del pago
   updatedAt: {
     type: Date,
     default: Date.now
@@ -116,16 +141,21 @@ const paymentSchema = new mongoose.Schema({
 
 const { validatePaymentUser } = require('../middleware/payment-validation');
 
-// Middleware para actualizar updatedAt antes de guardar
 paymentSchema.pre('save', function(next) {
   this.updatedAt = new Date();
   next();
 });
 
-// Middleware para validar que el usuario existe antes de guardar
 paymentSchema.pre('save', validatePaymentUser);
 
-// Índice compuesto para idempotencia robusta en mobbexId+reference
-paymentSchema.index({ mobbexId: 1, reference: 1 }, { unique: true });
+paymentSchema.index(
+  { mobbexId: 1, reference: 1 },
+  { unique: true, partialFilterExpression: { mobbexId: { $exists: true, $ne: null } } }
+);
+
+paymentSchema.index(
+  { mpPaymentId: 1 },
+  { unique: true, sparse: true }
+);
 
 module.exports = mongoose.model('Payment', paymentSchema);

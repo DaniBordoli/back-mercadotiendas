@@ -6,18 +6,19 @@ const { successResponse, errorResponse } = require('../utils/responseHelper');
 // Crear una nueva categoría
 exports.createCategory = async (req, res) => {
   try {
-    const { name, description, parent } = req.body;
-    
+    const { name, description, parent, image } = req.body;
+
     if (!name) {
       return errorResponse(res, 'El nombre es obligatorio', 400);
     }
-    
+
     const category = new Category({
       name,
       description,
-      parent: parent || null
+      parent: parent || null,
+      image: image || ''
     });
-    
+
     await category.save();
     return successResponse(res, category, 'Categoría creada exitosamente');
   } catch (error) {
@@ -52,7 +53,9 @@ exports.getAllCategories = async (req, res) => {
 // Obtener categorías principales (público - sin autenticación)
 exports.getPublicMainCategories = async (req, res) => {
   try {
-    const categories = await Category.find({ parent: { $exists: false } }).lean();
+    const categories = await Category.find({
+      $or: [{ parent: { $exists: false } }, { parent: null }]
+    }).lean();
     return successResponse(res, categories, 'Categorías principales obtenidas exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al obtener las categorías principales', 500, error.message);
@@ -112,17 +115,18 @@ exports.getSubcategoriesByParent = async (req, res) => {
 exports.updateCategory = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, parent } = req.body;
-    
+    const { name, description, parent, image } = req.body;
+
     const category = await Category.findById(id);
     if (!category) {
       return errorResponse(res, 'Categoría no encontrada', 404);
     }
-    
+
     if (name !== undefined) category.name = name;
     if (description !== undefined) category.description = description;
     if (parent !== undefined) category.parent = parent;
-    
+    if (image !== undefined) category.image = image;
+
     await category.save();
     return successResponse(res, category, 'Categoría actualizada exitosamente');
   } catch (error) {

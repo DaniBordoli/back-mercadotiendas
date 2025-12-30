@@ -128,8 +128,7 @@ const updateProfile = async (req, res) => {
       user.twoFactorEnabled = twoFactorEnabled;
     }
     if (userType && Array.isArray(userType)) {
-      // Validar que todos los tipos sean válidos
-      const validTypes = ['buyer', 'seller', 'influencer', 'admin'];
+      const validTypes = ['buyer', 'seller', 'influencer', 'admin', 'moderator'];
       const isValid = userType.every(type => validTypes.includes(type));
       if (isValid) {
         user.userType = userType;
@@ -292,6 +291,7 @@ async function listAdminUsers(req, res) {
     const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit || '20'), 10)));
     const role = typeof req.query.role === 'string' ? req.query.role : undefined;
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
 
     const filter = {};
     if (role) {
@@ -301,6 +301,16 @@ async function listAdminUsers(req, res) {
       filter.isActivated = true;
     } else if (status === 'deactivated') {
       filter.isActivated = false;
+    }
+
+    if (search) {
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, 'i');
+      filter.$or = [
+        { name: regex },
+        { fullName: regex },
+        { email: regex },
+      ];
     }
 
     const total = await User.countDocuments(filter);
@@ -324,7 +334,7 @@ async function updateUserTypeAdmin(req, res) {
     if (!Array.isArray(userType) || userType.length === 0) {
       return errorResponse(res, 'userType debe ser un arreglo no vacío', 400);
     }
-    const validTypes = ['buyer', 'seller', 'influencer', 'admin'];
+    const validTypes = ['buyer', 'seller', 'influencer', 'admin', 'moderator'];
     const isValid = userType.every((t) => validTypes.includes(t));
     if (!isValid) {
       return errorResponse(res, 'Tipo de usuario inválido', 400);
@@ -385,6 +395,32 @@ async function updateUserStatusAdmin(req, res) {
     return successResponse(res, { user }, 'Estado de usuario actualizado');
   } catch (err) {
     return errorResponse(res, 'Error actualizando estado de usuario', 500, err.message);
+  }
+}
+
+async function listModeratorsForSupport(req, res) {
+  try {
+    const filter = {
+      userType: { $in: ['moderator', 'admin'] },
+      isActivated: true
+    };
+    const users = await User.find(filter)
+      .select('_id name fullName email avatar userType')
+      .sort({ fullName: 1, name: 1, email: 1 })
+      .limit(200)
+      .lean();
+
+    const moderators = users.map((u) => ({
+      _id: u._id,
+      name: u.fullName || u.name || u.email,
+      email: u.email,
+      avatar: u.avatar || null,
+      userType: u.userType || []
+    }));
+
+    return successResponse(res, { moderators }, 'Listado de moderadores');
+  } catch (err) {
+    return errorResponse(res, 'Error al listar moderadores', 500, err.message);
   }
 }
 
@@ -460,6 +496,7 @@ module.exports = {
   listAdminUsers,
   updateUserTypeAdmin,
   updateUserStatusAdmin,
+  listModeratorsForSupport,
   setupTwoFactor,
   verifyTwoFactor,
   disableTwoFactor

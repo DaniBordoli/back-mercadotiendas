@@ -7,6 +7,7 @@ const { Campaign } = require('../models');
 const UPLOADS_DIR = path.join(__dirname, '../../uploads');
 const CAMPAIGNS_DIR = path.join(UPLOADS_DIR, 'campaigns');
 const LIVE_EVENTS_DIR = path.join(UPLOADS_DIR, 'live-events');
+const CATEGORIES_DIR = path.join(UPLOADS_DIR, 'categories');
 
 // Asegurar que los directorios existan
 if (!fs.existsSync(UPLOADS_DIR)) {
@@ -17,6 +18,9 @@ if (!fs.existsSync(CAMPAIGNS_DIR)) {
 }
 if (!fs.existsSync(LIVE_EVENTS_DIR)) {
   fs.mkdirSync(LIVE_EVENTS_DIR, { recursive: true });
+}
+if (!fs.existsSync(CATEGORIES_DIR)) {
+  fs.mkdirSync(CATEGORIES_DIR, { recursive: true });
 }
 
 exports.uploadCampaignImage = async (req, res) => {
@@ -104,6 +108,38 @@ exports.uploadLiveEventImage = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al subir imagen de evento en vivo:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al subir la imagen',
+      error: error.message
+    });
+  }
+};
+
+exports.uploadCategoryImage = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No se ha proporcionado ninguna imagen'
+      });
+    }
+
+    const fileExtension = path.extname(req.file.originalname);
+    const fileName = `${uuidv4()}${fileExtension}`;
+    const filePath = path.join(CATEGORIES_DIR, fileName);
+
+    fs.writeFileSync(filePath, req.file.buffer);
+
+    const imageUrl = `/uploads/categories/${fileName}`;
+
+    res.status(200).json({
+      success: true,
+      imageUrl,
+      message: 'Imagen subida exitosamente'
+    });
+  } catch (error) {
+    console.error('Error al subir imagen de categoría:', error);
     res.status(500).json({
       success: false,
       message: 'Error al subir la imagen',

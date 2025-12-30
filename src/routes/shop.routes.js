@@ -1,14 +1,15 @@
 const express = require('express');
 const router = express.Router();
-const { createShop, getShop, updateShop, deleteShop, updateShopTemplate, getShopTemplate, getMyShop, updateShopLogo, updateShopBanner, getPublicShop, updateMobbexCredentials, checkShopNameAvailability, followShop, getAdminShopsSummary, listAdminShops, updateShopStateAdmin } = require('../controllers/shop.controller');
+const { createShop, getShop, updateShop, deleteShop, updateShopTemplate, getShopTemplate, getMyShop, updateShopLogo, updateShopBanner, getPublicShop, updateMobbexCredentials, getMercadoPagoConnectUrl, handleMercadoPagoCallback, getMercadoPagoCredentials, deleteMercadoPagoCredentials, checkShopNameAvailability, followShop, getAdminShopsSummary, listAdminShops, updateShopStateAdmin } = require('../controllers/shop.controller');
 const { verifyToken } = require('../middlewares/auth');
 const requireAdmin = require('../middlewares/admin');
 
 // Ruta pública para obtener tienda por ID (sin autenticación)
 router.get('/public/:id', getPublicShop);
 
-// Ruta pública para verificar disponibilidad del nombre (sin autenticación)
 router.get('/check-name', checkShopNameAvailability);
+
+router.get('/mercadopago/callback', handleMercadoPagoCallback);
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
@@ -35,22 +36,21 @@ router.put('/logo', updateShopLogo);
 router.put('/logo', updateShopLogo);
 router.put('/banner', updateShopBanner);
 
-// Crear tienda
 router.post('/', createShop);
 
 // Obtener tienda por ID
 router.get('/:id', getShop);
 
-// Actualizar tienda
 router.put('/:id', updateShop);
 
-// Eliminar tienda
 router.delete('/:id', deleteShop);
 
-// Actualizar credenciales de Mobbex para una tienda
 router.put('/:id/mobbex-credentials', updateMobbexCredentials);
 
-// Seguir/Dejar de seguir una tienda
+router.get('/:id/mercadopago/connect-url', getMercadoPagoConnectUrl);
+router.get('/:id/mercadopago/credentials', getMercadoPagoCredentials);
+router.delete('/:id/mercadopago/credentials', deleteMercadoPagoCredentials);
+
 router.post('/:id/follow', followShop);
 
 module.exports = router;

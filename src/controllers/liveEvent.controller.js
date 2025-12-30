@@ -1622,25 +1622,57 @@ exports.listAdminLiveEvents = async (req, res) => {
   try {
     const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
     const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit || '20'), 10)));
-    const { status, ownerEmail, campaignId } = req.query || {};
+    const { status, search, hasCampaign, campaignId, sort } = req.query || {};
 
     const filter = {};
     if (status) filter.status = status;
     if (campaignId) filter.campaign = campaignId;
 
-    if (ownerEmail && typeof ownerEmail === 'string' && ownerEmail.trim() !== '') {
-      const owners = await User.find({ email: new RegExp(`^${ownerEmail}`, 'i') }).select('_id');
-      const ownerIds = owners.map(u => u._id);
-      if (ownerIds.length > 0) filter.owner = { $in: ownerIds };
-      else filter.owner = null;
+    if (hasCampaign === 'yes') {
+      filter.campaign = { $ne: null };
+    } else if (hasCampaign === 'no') {
+      filter.campaign = null;
     }
+
+    if (search && typeof search === 'string' && search.trim() !== '') {
+      const term = search.trim();
+      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, 'i');
+
+      const orConditions = [{ title: regex }];
+
+      const owners = await User.find({
+        $or: [
+          { name: regex },
+          { fullName: regex },
+          { email: regex },
+        ],
+      }).select('_id');
+      const ownerIds = owners.map(u => u._id);
+      if (ownerIds.length > 0) {
+        orConditions.push({ owner: { $in: ownerIds } });
+      }
+
+      const Campaign = require('../models/Campaign');
+      const campaigns = await Campaign.find({ name: regex }).select('_id');
+      const campaignIds = campaigns.map(c => c._id);
+      if (campaignIds.length > 0) {
+        orConditions.push({ campaign: { $in: campaignIds } });
+      }
+
+      if (orConditions.length > 0) {
+        filter.$or = orConditions;
+      }
+    }
+
+    const sortOrder = sort === 'asc' ? 1 : -1;
 
     const total = await LiveEvent.countDocuments(filter);
     const events = await LiveEvent.find(filter)
       .select('title startDateTime status owner campaign youtubeVideoId')
       .populate({ path: 'owner', select: 'name fullName email avatar' })
       .populate({ path: 'campaign', select: '_id name' })
-      .sort({ startDateTime: -1 })
+      .sort({ startDateTime: sortOrder })
       .skip((page - 1) * limit)
       .limit(limit);
 

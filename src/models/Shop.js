@@ -114,6 +114,31 @@ const shopSchema = new mongoose.Schema({
   mobbexTaxId: {
     type: String,
     default: null
+  },
+  // Credenciales de Mercado Pago por tienda
+  mpUserId: {
+    type: String,
+    default: null
+  },
+  mpAccessToken: {
+    type: String,
+    default: null
+  },
+  mpRefreshToken: {
+    type: String,
+    default: null
+  },
+  mpLiveMode: {
+    type: Boolean,
+    default: false
+  },
+  mpPublicKey: {
+    type: String,
+    default: null
+  },
+  mpLastOauthUpdate: {
+    type: Date,
+    default: null
   }
 });
 
