@@ -14,6 +14,16 @@ exports.getAllCampaigns = async (req, res) => {
   try {
     const { status, category, limit: limitQuery, offset: offsetQuery } = req.query;
 
+    const now = new Date();
+    try {
+      await Campaign.updateMany(
+        { status: 'active', endDate: { $lt: now } },
+        { $set: { status: 'closed' } }
+      );
+    } catch (autoCloseError) {
+      console.error('Error al cerrar campañas expiradas automáticamente:', autoCloseError);
+    }
+
     // Construir el filtro basado en los parámetros de consulta
     const filter = {};
     if (status) filter.status = status;
@@ -330,6 +340,8 @@ exports.getCampaignsByShop = async (req, res) => {
   try {
     const { shopId } = req.params;
 
+    const now = new Date();
+
     if (!mongoose.Types.ObjectId.isValid(shopId)) {
       return res.status(400).json({
         success: false,
@@ -353,6 +365,15 @@ exports.getCampaignsByShop = async (req, res) => {
         message: 'Error al verificar permisos del usuario',
         error: err.message
       });
+    }
+
+    try {
+      await Campaign.updateMany(
+        { shop: shopId, status: 'active', endDate: { $lt: now } },
+        { $set: { status: 'closed' } }
+      );
+    } catch (autoCloseError) {
+      console.error('Error al cerrar campañas expiradas automáticamente para la tienda:', autoCloseError);
     }
 
     const campaigns = await Campaign.find({ shop: shopId }).sort({ createdAt: -1 });

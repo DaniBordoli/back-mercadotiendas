@@ -51,6 +51,27 @@ router.put('/influencer-profile',
   influencerController.updateInfluencerProfile
 );
 
+router.get(
+  '/influencer/payout-methods',
+  verifyToken,
+  influencerController.getPayoutMethods
+);
+
+router.put(
+  '/influencer/payout-methods',
+  verifyToken,
+  [
+    check('payoutMethods').optional().isArray(),
+    check('payoutMethods.*.methodType')
+      .optional()
+      .isIn(['tuki_wallet', 'bank_transfer', 'other']),
+    check('payoutMethods.*.alias').optional().isString(),
+    check('payoutMethods.*.isDefault').optional().isBoolean(),
+    check('payoutMethods.*.active').optional().isBoolean()
+  ],
+  influencerController.updatePayoutMethods
+);
+
 // Rutas de administrador
 
 /**

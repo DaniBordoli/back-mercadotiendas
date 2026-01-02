@@ -19,7 +19,7 @@ exports.applyToBecomeInfluencer = async (req, res) => {
     }
 
     const userId = req.user._id;
-    const { niche, bio, socialMedia } = req.body;
+    const { niche, bio, socialMedia, payoutMethods } = req.body;
 
     // Verificar si el usuario ya es influencer
     const user = await User.findById(userId);
@@ -33,12 +33,12 @@ exports.applyToBecomeInfluencer = async (req, res) => {
       return res.status(400).json({ msg: 'Ya existe un perfil de influencer para este usuario' });
     }
 
-    // Crear nuevo perfil de influencer
     influencerProfile = new InfluencerProfile({
       user: userId,
       niche,
       bio,
       socialMedia,
+      payoutMethods,
       applicationStatus: 'pending'
     });
 
@@ -122,13 +122,11 @@ exports.updateInfluencerProfile = async (req, res) => {
     const userId = req.user._id;
     const { niche, bio, socialMedia } = req.body;
 
-    // Verificar si existe el perfil
     let influencerProfile = await InfluencerProfile.findOne({ user: userId });
     if (!influencerProfile) {
       return res.status(404).json({ msg: 'Perfil de influencer no encontrado' });
     }
 
-    // Actualizar campos
     if (niche) influencerProfile.niche = niche;
     if (bio) influencerProfile.bio = bio;
     if (socialMedia) influencerProfile.socialMedia = socialMedia;
@@ -138,6 +136,74 @@ exports.updateInfluencerProfile = async (req, res) => {
     res.json({
       msg: 'Perfil de influencer actualizado correctamente',
       profile: influencerProfile
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Error en el servidor');
+  }
+};
+
+exports.getPayoutMethods = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const profile = await InfluencerProfile.findOne({ user: userId }).select('payoutMethods');
+    if (!profile) {
+      return res.status(404).json({ msg: 'Perfil de influencer no encontrado' });
+    }
+    return res.json({
+      payoutMethods: profile.payoutMethods || []
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Error en el servidor');
+  }
+};
+
+exports.updatePayoutMethods = async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const userId = req.user._id;
+    const { payoutMethods } = req.body;
+
+    let influencerProfile = await InfluencerProfile.findOne({ user: userId });
+    if (!influencerProfile) {
+      return res.status(404).json({ msg: 'Perfil de influencer no encontrado' });
+    }
+
+    const methodsArray = Array.isArray(payoutMethods) ? payoutMethods : [];
+    let hasDefault = false;
+    const normalized = methodsArray.map((m) => {
+      const method = {
+        methodType: m.methodType,
+        alias: m.alias,
+        details: m.details || {},
+        isDefault: Boolean(m.isDefault),
+        active: m.active !== false,
+        createdAt: m.createdAt ? new Date(m.createdAt) : new Date(),
+        updatedAt: new Date()
+      };
+      if (method.isDefault && !hasDefault) {
+        hasDefault = true;
+      } else {
+        method.isDefault = false;
+      }
+      return method;
+    });
+
+    if (!hasDefault && normalized.length > 0) {
+      normalized[0].isDefault = true;
+    }
+
+    influencerProfile.payoutMethods = normalized;
+    await influencerProfile.save();
+
+    return res.json({
+      msg: 'Métodos de cobro actualizados correctamente',
+      payoutMethods: influencerProfile.payoutMethods
     });
   } catch (err) {
     console.error(err.message);

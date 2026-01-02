@@ -28,7 +28,6 @@ const influencerProfileSchema = new mongoose.Schema({
     maxlength: 1000
   },
   
-  // Redes sociales del influencer
   socialMedia: [{
     platform: {
       type: String,
@@ -47,6 +46,37 @@ const influencerProfileSchema = new mongoose.Schema({
     url: {
       type: String,
       trim: true
+    }
+  }],
+  payoutMethods: [{
+    methodType: {
+      type: String,
+      required: true,
+      enum: ['tuki_wallet', 'bank_transfer', 'other']
+    },
+    alias: {
+      type: String,
+      trim: true
+    },
+    details: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    isDefault: {
+      type: Boolean,
+      default: false
+    },
+    active: {
+      type: Boolean,
+      default: true
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now
     }
   }],
   

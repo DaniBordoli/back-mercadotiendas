@@ -684,7 +684,11 @@ exports.updateLiveEvent = async (req, res) => {
 exports.getPublicLiveEvents = async (req, res) => {
   try {
     const events = await LiveEvent.find({ status: { $in: ['published', 'live'] } })
-      .populate({ path: 'owner', select: 'name fullName avatar' })
+      .populate({
+        path: 'owner',
+        select: 'name fullName avatar influencerProfile userType',
+        populate: { path: 'shop', select: 'name imageUrl followers' }
+      })
       .populate('products')
       .populate({ path: 'campaign', select: '_id name kpis' })
       .sort({ startDateTime: -1 });

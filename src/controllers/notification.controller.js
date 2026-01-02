@@ -1,6 +1,8 @@
 const Notification = require('../models/Notification');
 const { successResponse, errorResponse } = require('../utils/response');
 const mongoose = require('mongoose');
+const NotificationService = require('../services/notification.service');
+const { NotificationTypes } = require('../constants/notificationTypes');
 
 /**
  * GET /api/notifications
@@ -156,8 +158,45 @@ const markAllNotificationsRead = async (req, res) => {
   }
 };
 
+const createLiveReminderNotification = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { eventId, eventTitle, creatorName, timeLabel } = req.body || {};
+
+    if (!eventId) {
+      return errorResponse(res, 'eventId es requerido', 400);
+    }
+
+    const io = req.app.get('io');
+
+    const title = creatorName ? `¡${creatorName} está en vivo!` : '¡Tu live ha empezado!';
+    const messageBase = timeLabel ? `Comienza a las ${timeLabel}.` : '';
+    const message = messageBase || 'Te avisaremos cuando comience el evento.';
+
+    await NotificationService.emitAndPersist(io, {
+      users: [userId],
+      type: NotificationTypes.LIVE_HIGHLIGHT,
+      title,
+      message,
+      entity: eventId,
+      data: {
+        eventId,
+        eventTitle: eventTitle || '',
+        creatorName: creatorName || '',
+        timeLabel: timeLabel || ''
+      }
+    });
+
+    return successResponse(res, null, 'Notificación de recordatorio creada');
+  } catch (error) {
+    console.error('Error al crear notificación de recordatorio:', error);
+    return errorResponse(res, 'Error al crear notificación de recordatorio', 500, error.message);
+  }
+};
+
 module.exports = {
   getNotifications,
   markNotificationRead,
-  markAllNotificationsRead
+  markAllNotificationsRead,
+  createLiveReminderNotification
 };
