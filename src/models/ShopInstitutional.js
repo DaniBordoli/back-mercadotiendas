@@ -1,5 +1,46 @@
 const mongoose = require('mongoose');
 
+const teamMemberSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      trim: true,
+      maxLength: 100
+    },
+    role: {
+      type: String,
+      trim: true,
+      maxLength: 100
+    },
+    imageUrl: {
+      type: String,
+      trim: true,
+      maxLength: 500
+    },
+    description: {
+      type: String,
+      trim: true,
+      maxLength: 1000
+    },
+    instagramUrl: {
+      type: String,
+      trim: true,
+      maxLength: 500
+    },
+    tiktokUrl: {
+      type: String,
+      trim: true,
+      maxLength: 500
+    },
+    facebookUrl: {
+      type: String,
+      trim: true,
+      maxLength: 500
+    }
+  },
+  { _id: false }
+);
+
 const shopInstitutionalSchema = new mongoose.Schema({
   shop: {
     type: mongoose.Schema.Types.ObjectId,
@@ -11,6 +52,21 @@ const shopInstitutionalSchema = new mongoose.Schema({
     type: String,
     trim: true,
     maxLength: 2000
+  },
+  shippingPolicy: {
+    type: String,
+    trim: true,
+    maxLength: 5000
+  },
+  returnPolicy: {
+    type: String,
+    trim: true,
+    maxLength: 5000
+  },
+  termsAndConditions: {
+    type: String,
+    trim: true,
+    maxLength: 5000
   },
   mission: {
     type: String,
@@ -32,6 +88,25 @@ const shopInstitutionalSchema = new mongoose.Schema({
     trim: true,
     maxLength: 2000
   },
+  taxId: {
+    type: String,
+    trim: true,
+    maxLength: 100
+  },
+  businessName: {
+    type: String,
+    trim: true,
+    maxLength: 255
+  },
+  fiscalAddress: {
+    type: String,
+    trim: true,
+    maxLength: 500
+  },
+  teamMembers: {
+    type: [teamMemberSchema],
+    default: []
+  },
   createdAt: {
     type: Date,
     default: Date.now
@@ -42,7 +117,6 @@ const shopInstitutionalSchema = new mongoose.Schema({
   }
 });
 
-// Middleware para actualizar updatedAt antes de cada save
 shopInstitutionalSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
   next();

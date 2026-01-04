@@ -33,7 +33,20 @@ exports.getShopInstitutional = async (req, res) => {
 exports.updateShopInstitutional = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { description, mission, vision, history, values } = req.body;
+    const {
+      description,
+      mission,
+      vision,
+      history,
+      values,
+      shippingPolicy,
+      returnPolicy,
+      termsAndConditions,
+      taxId,
+      businessName,
+      fiscalAddress,
+      teamMembers
+    } = req.body;
     
     const user = await User.findById(userId).populate('shop');
     
@@ -59,6 +72,13 @@ exports.updateShopInstitutional = async (req, res) => {
     if (vision !== undefined) institutional.vision = vision;
     if (history !== undefined) institutional.history = history;
     if (values !== undefined) institutional.values = values;
+    if (shippingPolicy !== undefined) institutional.shippingPolicy = shippingPolicy;
+    if (returnPolicy !== undefined) institutional.returnPolicy = returnPolicy;
+    if (termsAndConditions !== undefined) institutional.termsAndConditions = termsAndConditions;
+    if (taxId !== undefined) institutional.taxId = taxId;
+    if (businessName !== undefined) institutional.businessName = businessName;
+    if (fiscalAddress !== undefined) institutional.fiscalAddress = fiscalAddress;
+    if (Array.isArray(teamMembers)) institutional.teamMembers = teamMembers;
 
     await institutional.save();
 
