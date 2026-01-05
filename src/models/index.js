@@ -17,6 +17,7 @@ const DisputeReason = require('./DisputeReason');
 const ChatMessage = require('./ChatMessage');
 const AuditLog = require('./AuditLog');
 const SystemConfig = require('./SystemConfig');
+const Clip = require('./Clip');
 
 module.exports = {
   User,
@@ -30,13 +31,14 @@ module.exports = {
   ProductVisit,
   LiveEventMetrics,
   LiveEventProductMetrics,
-  ProductReview
-  , Claim
-  , Dispute
-  , DisputeMessage
-  , DisputeReason
-  , ChatMessage
-  , AuditLog
-  , SystemConfig
+  ProductReview,
+  Claim,
+  Dispute,
+  DisputeMessage,
+  DisputeReason,
+  ChatMessage,
+  AuditLog,
+  SystemConfig,
+  Clip
 };
 

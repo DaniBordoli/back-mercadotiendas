@@ -1,7 +1,7 @@
 const { validationResult } = require('express-validator');
 const crypto = require('crypto');
 const mongoose = require('mongoose');
-const { LiveEvent, User, LiveEventMetrics, LiveEventProductMetrics, AuditLog } = require('../models');
+const { LiveEvent, User, LiveEventMetrics, LiveEventProductMetrics, AuditLog, Clip } = require('../models');
 const { ChatMessage } = require('../models');
 const NotificationService = require('../services/notification.service');
 const { NotificationTypes } = require('../constants/notificationTypes');
@@ -217,6 +217,7 @@ exports.handleMuxWebhook = async (req, res) => {
     const evt = req.body || {};
     const type = String(evt.type || '').toLowerCase();
     const data = evt.data || {};
+
     let liveStreamId = data.id || data.live_stream_id || data.source_live_stream_id || null;
     let event = null;
     if (liveStreamId) {
@@ -225,25 +226,71 @@ exports.handleMuxWebhook = async (req, res) => {
     if (!event && data.asset_id) {
       event = await LiveEvent.findOne({ muxAssetId: data.asset_id }).select('_id status muxAssetId muxPlaybackId');
     }
-    if (!event) {
+
+    if (event) {
+      let newStatus = null;
+      if (type.includes('live_stream.connected') || type.includes('live_stream.active')) newStatus = 'live';
+      else if (type.includes('live_stream.disconnected') || type.includes('live_stream.idle') || type.includes('asset.ready')) newStatus = 'finished';
+      if (type.includes('asset.ready') && data.id && !event.muxAssetId) {
+        event.muxAssetId = String(data.id);
+      }
+      if (newStatus && event.status !== newStatus) {
+        event.status = newStatus;
+        if (newStatus === 'finished') event.endedAt = new Date();
+      }
+      event.muxStatus = type;
+      await event.save();
+      const io = req.app.get('io');
+      if (io && event._id) {
+        io.to(`event_${event._id}`).emit('metricsUpdate', { eventId: String(event._id), status: event.status, muxStatus: event.muxStatus });
+      }
       return res.json({ success: true });
     }
-    let newStatus = null;
-    if (type.includes('live_stream.connected') || type.includes('live_stream.active')) newStatus = 'live';
-    else if (type.includes('live_stream.disconnected') || type.includes('live_stream.idle') || type.includes('asset.ready')) newStatus = 'finished';
-    if (type.includes('asset.ready') && data.id && !event.muxAssetId) {
-      event.muxAssetId = String(data.id);
+
+    let clip = null;
+
+    if (type.includes('video.upload.created') && data.id) {
+      clip = await Clip.findOne({ muxUploadId: data.id });
+      if (clip && (!clip.status || clip.status === 'pending')) {
+        clip.status = 'uploading';
+      }
+    } else if (type.includes('video.upload.asset_created')) {
+      const uploadId = data.upload_id || data.id;
+      if (uploadId) {
+        clip = await Clip.findOne({ muxUploadId: uploadId });
+        if (clip) {
+          if (data.asset_id && !clip.muxAssetId) {
+            clip.muxAssetId = String(data.asset_id);
+          }
+          clip.status = 'processing';
+        }
+      }
+    } else if (type.includes('video.asset.ready') && data.id) {
+      clip = await Clip.findOne({ muxAssetId: data.id });
+      if (clip) {
+        clip.status = 'published';
+        if (typeof data.duration === 'number') {
+          clip.duration = data.duration;
+        }
+        if (Array.isArray(data.playback_ids) && data.playback_ids.length) {
+          const playbackId = data.playback_ids[0].id;
+          clip.muxPlaybackId = playbackId;
+          if (!clip.thumbnailUrl && playbackId) {
+            clip.thumbnailUrl = `https://image.mux.com/${playbackId}/thumbnail.jpg`;
+          }
+        }
+      }
+    } else if (type.includes('video.upload.errored') && data.id) {
+      clip = await Clip.findOne({ muxUploadId: data.id });
+      if (clip) {
+        clip.status = 'error';
+      }
     }
-    if (newStatus && event.status !== newStatus) {
-      event.status = newStatus;
-      if (newStatus === 'finished') event.endedAt = new Date();
+
+    if (clip) {
+      await clip.save();
     }
-    event.muxStatus = type;
-    await event.save();
-    const io = req.app.get('io');
-    if (io && event._id) {
-      io.to(`event_${event._id}`).emit('metricsUpdate', { eventId: String(event._id), status: event.status, muxStatus: event.muxStatus });
-    }
+
     return res.json({ success: true });
   } catch (error) {
     try {

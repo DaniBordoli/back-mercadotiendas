@@ -34,6 +34,7 @@ const contactMessageRoutes = require('./contactMessage.routes');
 const favoritesRoutes = require('./favorites.routes');
 const auditRoutes = require('./audit.routes');
 const adminRoutes = require('./admin.routes');
+const streamingRoutes = require('./streaming.routes');
 const { getOrderById, updateOrderTracking } = require('../controllers/payment.controller');
 
 // Rutas de autenticación (/api/auth/*)
@@ -97,6 +98,7 @@ router.use('/shop-institutional', shopInstitutionalRoutes);
 // Rutas de campañas (/api/campaigns/*)
 router.use('/campaigns', campaignRoutes);
 router.use('/live-events', liveEventRoutes);
+router.use('/streaming', streamingRoutes);
 router.post('/mux/webhook', liveEventController.handleMuxWebhook);
 
 // Rutas de aplicaciones a campañas (/api/applications/*)

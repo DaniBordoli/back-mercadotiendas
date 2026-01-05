@@ -51,6 +51,49 @@ async function createLiveStream(opts = {}) {
   }
 }
 
+async function createDirectUpload(opts = {}) {
+  const auth = getAuth();
+  const body = {
+    new_asset_settings: {
+      playback_policy: ['public'],
+      ...(opts.newAssetSettings || {}),
+    },
+    cors_origin: opts.corsOrigin || '*',
+    ...(opts.test === true ? { test: true } : {}),
+    ...(opts.passthrough ? { passthrough: opts.passthrough } : {}),
+  };
+  try {
+    const { data } = await axios.post('https://api.mux.com/video/v1/uploads', body, { auth });
+    const upload = data && data.data ? data.data : data;
+    return {
+      id: upload.id,
+      url: upload.url,
+      assetId: upload.asset_id || null,
+    };
+  } catch (err) {
+    const status = err?.response?.status;
+    const payload = err?.response?.data;
+    let message = 'Mux createDirectUpload failed';
+    if (status) message += ` (${status})`;
+    if (payload) {
+      try {
+        if (payload.error?.messages && Array.isArray(payload.error.messages)) {
+          message += `: ${payload.error.messages.join('; ')}`;
+        } else if (payload.error?.message) {
+          message += `: ${payload.error.message}`;
+        } else if (payload.errors && Array.isArray(payload.errors)) {
+          message += `: ${payload.errors.map(e => e.message || e).join('; ')}`;
+        } else {
+          message += `: ${JSON.stringify(payload)}`;
+        }
+      } catch (_) {}
+    }
+    const e = new Error(message);
+    e.code = status;
+    throw e;
+  }
+}
+
 async function disableLiveStream(liveStreamId) {
   const auth = getAuth();
   await axios.put(`https://api.mux.com/video/v1/live-streams/${liveStreamId}/disable`, {}, { auth });
@@ -63,11 +106,6 @@ async function getLiveStream(liveStreamId) {
   return data && data.data ? data.data : data;
 }
 
-// Genera un token JWT para el Broadcast WebRTC de Mux.
-// Soporta Signing Keys en formato:
-//  - MUX_SIGNING_KEY_PRIVATE_KEY (PEM)  -> RS256
-//  - MUX_SIGNING_KEY_SECRET (string)    -> HS256 (fallback)
-//  - siempre requiere MUX_SIGNING_KEY_ID
 function createBroadcastToken(streamKey, { ttlSeconds = 3600 } = {}) {
   const keyId = (process.env.MUX_SIGNING_KEY_ID || '').trim();
   const privateKey = (process.env.MUX_SIGNING_KEY_PRIVATE_KEY || '').trim();
@@ -90,4 +128,4 @@ function createBroadcastToken(streamKey, { ttlSeconds = 3600 } = {}) {
   return jwt.sign(payload, secret, { algorithm: 'HS256', keyid: keyId });
 }
 
-module.exports = { createLiveStream, disableLiveStream, getLiveStream, createBroadcastToken };
+module.exports = { createLiveStream, createDirectUpload, disableLiveStream, getLiveStream, createBroadcastToken };
