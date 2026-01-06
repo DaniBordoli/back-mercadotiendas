@@ -18,6 +18,7 @@ const ChatMessage = require('./ChatMessage');
 const AuditLog = require('./AuditLog');
 const SystemConfig = require('./SystemConfig');
 const Clip = require('./Clip');
+const ClipComment = require('./ClipComment');
 
 module.exports = {
   User,
@@ -39,6 +40,7 @@ module.exports = {
   ChatMessage,
   AuditLog,
   SystemConfig,
-  Clip
+  Clip,
+  ClipComment
 };
 

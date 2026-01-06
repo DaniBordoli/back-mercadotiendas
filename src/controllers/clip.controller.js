@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { Clip } = require('../models');
+const { Clip, ClipComment, User } = require('../models');
 const { successResponse, errorResponse } = require('../utils/response');
 
 exports.createUploadUrl = async (req, res) => {
@@ -189,6 +189,10 @@ exports.discoverClips = async (req, res) => {
         thumbnailUrl: clip.thumbnailUrl,
         duration: clip.duration,
         createdAt: clip.createdAt,
+        views: typeof clip.views === 'number' ? clip.views : 0,
+        likes: typeof clip.likes === 'number' ? clip.likes : 0,
+        shares: typeof clip.shares === 'number' ? clip.shares : 0,
+        comments: typeof clip.comments === 'number' ? clip.comments : 0,
         product: clip.product,
         creator: {
           _id: owner._id,
@@ -226,5 +230,166 @@ exports.getClipsByProduct = async (req, res) => {
     return successResponse(res, clips, 'Clips del producto obtenidos exitosamente');
   } catch (error) {
     return errorResponse(res, 'Error al obtener clips del producto', 500, error.message);
+  }
+};
+
+exports.updateClipMetrics = async (req, res) => {
+  try {
+    const { clipId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(clipId)) {
+      return errorResponse(res, 'clipId inválido', 400);
+    }
+
+    const { views, likes, shares } = req.body || {};
+
+    const inc = {};
+    const addInc = (key, value) => {
+      const num = Number(value);
+      if (!Number.isNaN(num) && num > 0) {
+        inc[key] = num;
+      }
+    };
+
+    addInc('views', views);
+    addInc('likes', likes);
+    addInc('shares', shares);
+
+    if (!Object.keys(inc).length) {
+      return successResponse(
+        res,
+        null,
+        'Sin cambios en métricas del clip'
+      );
+    }
+
+    const clip = await Clip.findOneAndUpdate(
+      {
+        _id: clipId,
+        status: 'published',
+        visibility: 'public',
+        isApproved: true,
+      },
+      { $inc: inc },
+      { new: true }
+    );
+
+    if (!clip) {
+      return errorResponse(res, 'Clip no encontrado o no público', 404);
+    }
+
+    return successResponse(
+      res,
+      {
+        _id: clip._id,
+        views: typeof clip.views === 'number' ? clip.views : 0,
+        likes: typeof clip.likes === 'number' ? clip.likes : 0,
+        shares: typeof clip.shares === 'number' ? clip.shares : 0,
+      },
+      'Métricas del clip actualizadas exitosamente'
+    );
+  } catch (error) {
+    return errorResponse(res, 'Error al actualizar métricas del clip', 500, error.message);
+  }
+};
+
+exports.getClipComments = async (req, res) => {
+  try {
+    const { clipId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(clipId)) {
+      return errorResponse(res, 'clipId inválido', 400);
+    }
+
+    const { limit } = req.query || {};
+    const lim = Number(limit) > 0 && Number(limit) <= 100 ? Number(limit) : 50;
+
+    const comments = await ClipComment.find({ clip: clipId })
+      .sort({ createdAt: -1 })
+      .limit(lim)
+      .populate('user', 'name fullName avatar');
+
+    const payload = comments.map((c) => {
+      const user = c.user || {};
+      const displayName = user.fullName || user.name || '';
+      return {
+        _id: c._id,
+        text: c.text,
+        createdAt: c.createdAt,
+        user: {
+          _id: user._id,
+          name: displayName,
+          avatar: user.avatar || null,
+        },
+      };
+    });
+
+    return successResponse(res, payload, 'Comentarios del clip obtenidos exitosamente');
+  } catch (error) {
+    return errorResponse(res, 'Error al obtener comentarios del clip', 500, error.message);
+  }
+};
+
+exports.createClipComment = async (req, res) => {
+  try {
+    const { clipId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(clipId)) {
+      return errorResponse(res, 'clipId inválido', 400);
+    }
+
+    const { text } = req.body || {};
+    if (!text || typeof text !== 'string' || !text.trim()) {
+      return errorResponse(res, 'El comentario es obligatorio', 400);
+    }
+
+    const normalizedText = text.trim();
+    if (normalizedText.length > 500) {
+      return errorResponse(res, 'El comentario es demasiado largo', 400);
+    }
+
+    const clip = await Clip.findOne({
+      _id: clipId,
+      status: 'published',
+      visibility: 'public',
+      isApproved: true,
+    });
+    if (!clip) {
+      return errorResponse(res, 'Clip no encontrado o no público', 404);
+    }
+
+    const userId = req.user && req.user._id;
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return errorResponse(res, 'Usuario no autorizado', 401);
+    }
+
+    const comment = await ClipComment.create({
+      clip: clip._id,
+      user: userId,
+      text: normalizedText,
+    });
+
+    await Clip.updateOne(
+      { _id: clip._id },
+      { $inc: { comments: 1 } }
+    );
+
+    const populatedUser = await User.findById(userId).select('name fullName avatar');
+    const displayName = populatedUser ? populatedUser.fullName || populatedUser.name || '' : '';
+
+    return successResponse(
+      res,
+      {
+        _id: comment._id,
+        text: comment.text,
+        createdAt: comment.createdAt,
+        user: {
+          _id: userId,
+          name: displayName,
+          avatar: populatedUser ? populatedUser.avatar || null : null,
+        },
+      },
+      'Comentario creado exitosamente',
+      201
+    );
+  } catch (error) {
+    return errorResponse(res, 'Error al crear comentario del clip', 500, error.message);
   }
 };

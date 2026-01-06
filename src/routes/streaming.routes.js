@@ -10,5 +10,8 @@ router.patch('/clips/:clipId', verifyToken, isInfluencer, clipController.updateC
 router.delete('/clips/:clipId', verifyToken, isInfluencer, clipController.deleteClip);
 router.get('/clips/discover', clipController.discoverClips);
 router.get('/clips/by-product/:productId', clipController.getClipsByProduct);
+router.patch('/clips/:clipId/metrics', clipController.updateClipMetrics);
+router.get('/clips/:clipId/comments', clipController.getClipComments);
+router.post('/clips/:clipId/comments', verifyToken, clipController.createClipComment);
 
 module.exports = router;

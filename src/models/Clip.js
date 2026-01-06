@@ -82,6 +82,10 @@ const clipSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    comments: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true,
@@ -89,4 +93,3 @@ const clipSchema = new mongoose.Schema(
 );
 
 module.exports = mongoose.model('Clip', clipSchema);
-
