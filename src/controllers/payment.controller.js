@@ -574,7 +574,11 @@ const createMercadoPagoCheckout = async (req, res) => {
     return successResponse(res, payload, 'Preferencias de Mercado Pago creadas exitosamente');
   } catch (error) {
     console.error('Error en createMercadoPagoCheckout:', error);
-    return errorResponse(res, 'Error al crear checkout de Mercado Pago', 500, error.message);
+    const details = error && error.message ? String(error.message) : '';
+    const message = details
+      ? `Error al crear checkout de Mercado Pago: ${details}`
+      : 'Error al crear checkout de Mercado Pago';
+    return errorResponse(res, message, 500, details);
   }
 };
 
