@@ -13,6 +13,7 @@ const LiveEventMetrics = require('../models/LiveEventMetrics');
 const LiveEventProductMetrics = require('../models/LiveEventProductMetrics');
 const { emitNotification } = require('../utils/notification');
 const SystemConfig = require('../models/SystemConfig');
+const mobbexConfig = require('../config/mobbex');
 
 /**
  * Crea un checkout para un pedido
