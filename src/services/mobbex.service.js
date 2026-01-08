@@ -137,7 +137,23 @@ const createCheckout = async (orderData, customerData, items, credentials = {}, 
         unit_price: item.price,
         total: item.price * item.quantity,
         image: item.image || 'https://www.mobbex.com/wp-content/uploads/2019/03/web_logo.png'
-      }))
+      })),
+      options: {
+        theme: {
+          type: 'light',
+          header: {
+            name: 'Tuki',
+            logo: 'https://i.ibb.co/39g5ggQy/logo-tuki.png'
+          },
+          colors: {
+            primary: '#FF4F41'
+          },
+          paymentFlow: {
+            background: '#FFFFFF',
+            header: '#000000'
+          }
+        }
+      }
     };
 
     console.log('=== MOBBEX SERVICE: Datos preparados para enviar a Mobbex ===');
