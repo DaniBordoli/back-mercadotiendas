@@ -86,6 +86,11 @@ const liveEventSchema = new mongoose.Schema(
       trim: true,
       default: null,
     },
+    muxReplayPlaybackId: {
+      type: String,
+      trim: true,
+      default: null,
+    },
     muxStreamKey: {
       type: String,
       trim: true,

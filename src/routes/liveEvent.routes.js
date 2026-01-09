@@ -11,6 +11,8 @@ router.get('/', verifyToken, isInfluencer, liveEventController.getLiveEvents);
 
 // GET /api/live-events/public - Obtener eventos publicados (público)
 router.get('/public', liveEventController.getPublicLiveEvents);
+// GET /api/live-events/public/finished - Obtener eventos finalizados con replay (público)
+router.get('/public/finished', liveEventController.getPublicFinishedLiveEvents);
 
 // PUT /api/live-events/:id/highlight - Actualizar producto destacado (influencer autenticado)
 router.put('/:id/highlight', verifyToken, isInfluencer, liveEventController.updateHighlightedProduct);
@@ -59,6 +61,9 @@ router.patch('/admin/:id/status', verifyToken, requireAdmin, liveEventController
 
 // GET /api/live-events/:id - Obtener un evento específico (público con filtrado por estado)
 router.get('/:id', liveEventController.getLiveEvent);
+
+// GET /api/live-events/:id/replay - Obtener datos de replay (público)
+router.get('/:id/replay', liveEventController.getLiveEventReplay);
 
 // GET /api/live-events/:id/metrics - Obtener métricas del evento (público)
 router.get('/:id/metrics', liveEventController.getMetrics);

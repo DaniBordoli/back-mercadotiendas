@@ -231,8 +231,15 @@ exports.handleMuxWebhook = async (req, res) => {
       let newStatus = null;
       if (type.includes('live_stream.connected') || type.includes('live_stream.active')) newStatus = 'live';
       else if (type.includes('live_stream.disconnected') || type.includes('live_stream.idle') || type.includes('asset.ready')) newStatus = 'finished';
-      if (type.includes('asset.ready') && data.id && !event.muxAssetId) {
+      const isAssetReady = type.includes('asset.ready');
+      if (isAssetReady && data.id && !event.muxAssetId) {
         event.muxAssetId = String(data.id);
+      }
+      if (isAssetReady && Array.isArray(data.playback_ids) && data.playback_ids.length && !event.muxReplayPlaybackId) {
+        const playbackId = data.playback_ids[0]?.id || data.playback_ids[0];
+        if (playbackId) {
+          event.muxReplayPlaybackId = String(playbackId);
+        }
       }
       if (newStatus && event.status !== newStatus) {
         event.status = newStatus;
@@ -428,7 +435,17 @@ exports.getLiveEvents = async (req, res) => {
       .populate('products')
       .populate({ path: 'campaign', select: '_id name kpis' })
       .sort({ startDateTime: 1 });
-    res.json(events);
+    const mapped = events.map(e => {
+      const obj = e.toObject();
+      const platform = String(obj.platform || '').toLowerCase();
+      const status = String(obj.status || '').toLowerCase();
+      const hasReplay = platform === 'mux'
+        && status === 'finished'
+        && !!obj.muxAssetId
+        && !!(obj.muxReplayPlaybackId || obj.muxPlaybackId);
+      return { ...obj, hasReplay };
+    });
+    res.json(mapped);
   } catch (error) {
     console.error('Error fetching live events:', error);
     res.status(500).json({ message: 'Error al obtener eventos' });
@@ -747,6 +764,55 @@ exports.getPublicLiveEvents = async (req, res) => {
   }
 };
 
+exports.getPublicFinishedLiveEvents = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit || '12'), 10)));
+
+    const baseFilter = {
+      status: 'finished',
+      platform: 'mux',
+      muxAssetId: { $ne: null },
+    };
+
+    const filter = { ...baseFilter };
+
+    if (req.query.creator) {
+      filter.owner = req.query.creator;
+    }
+
+    if (req.query.q) {
+      filter.title = { $regex: String(req.query.q), $options: 'i' };
+    }
+
+    const total = await LiveEvent.countDocuments(filter);
+
+    const events = await LiveEvent.find(filter)
+      .select('title description previewImageUrl slug startDateTime endedAt owner muxReplayPlaybackId muxPlaybackId muxAssetId status platform')
+      .populate({
+        path: 'owner',
+        select: 'name fullName avatar influencerProfile',
+        populate: { path: 'shop', select: 'name imageUrl followers' },
+      })
+      .sort({ startDateTime: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit);
+
+    return res.json({
+      success: true,
+      data: {
+        total,
+        page,
+        limit,
+        events,
+      },
+    });
+  } catch (error) {
+    console.error('Error obteniendo eventos públicos finalizados:', error);
+    return res.status(500).json({ success: false, message: 'Error al obtener streams finalizados', error: error.message });
+  }
+};
+
 exports.addReminder = async (req, res) => {
   try {
     const { id } = req.params;
@@ -831,6 +897,68 @@ exports.getLiveEvent = async (req, res) => {
   } catch (error) {
     console.error('Error obteniendo evento en vivo:', error);
     res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+  }
+};
+
+exports.getLiveEventReplay = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const isValidObjectId = mongoose.Types.ObjectId.isValid(id);
+    const baseQuery = isValidObjectId ? { _id: id } : { slug: id };
+
+    const event = await LiveEvent
+      .findOne(baseQuery)
+      .select('title description status platform muxPlaybackId muxReplayPlaybackId muxAssetId previewImageUrl slug startDateTime endedAt owner')
+      .populate({
+        path: 'owner',
+        select: 'name fullName avatar influencerProfile followers',
+        populate: { path: 'shop', select: 'name imageUrl followers' },
+      });
+
+    if (!event) {
+      return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+    }
+
+    const isPublicStatus = ['finished'].includes(event.status);
+    if (!isPublicStatus) {
+      return res.status(400).json({ success: false, message: 'El evento aún no está finalizado' });
+    }
+
+    if (String(event.platform || '').toLowerCase() !== 'mux') {
+      return res.status(400).json({ success: false, message: 'El evento no utiliza Mux como plataforma principal' });
+    }
+
+    if (!event.muxAssetId) {
+      return res.status(400).json({ success: false, message: 'La grabación de Mux aún no está disponible' });
+    }
+
+    const playbackId = event.muxReplayPlaybackId || event.muxPlaybackId;
+    if (!playbackId) {
+      return res.status(400).json({ success: false, message: 'No hay playbackId disponible para este evento' });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        playbackId,
+        title: event.title,
+        description: event.description,
+        previewImageUrl: event.previewImageUrl || null,
+        slug: event.slug || null,
+        status: event.status,
+        platform: event.platform,
+        muxAssetId: event.muxAssetId,
+        muxReplayPlaybackId: event.muxReplayPlaybackId || null,
+        muxPlaybackId: event.muxPlaybackId || null,
+        startDateTime: event.startDateTime,
+        endedAt: event.endedAt,
+        owner: event.owner || null,
+      },
+    });
+  } catch (error) {
+    console.error('Error obteniendo replay de evento en vivo:', error);
+    return res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
   }
 };
 
