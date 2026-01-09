@@ -27,16 +27,16 @@ const liveEventSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
-  products: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Product',
-  }],
-  socialAccounts: [
-    {
-      platform: String,
-      username: String,
-    },
-  ],
+    products: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Product',
+    }],
+    socialAccounts: [
+      {
+        platform: String,
+        username: String,
+      },
+    ],
     owner: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -48,10 +48,6 @@ const liveEventSchema = new mongoose.Schema(
       ref: 'Campaign',
       default: null,
     },
-    products: [{
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Product',
-    }],
     highlightedProduct: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Product',
@@ -109,6 +105,10 @@ const liveEventSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: null,
+    },
+    remindersCount: {
+      type: Number,
+      default: 0,
     },
     slug: {
       type: String,

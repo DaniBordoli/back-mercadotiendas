@@ -66,6 +66,9 @@ router.get('/:id/metrics', liveEventController.getMetrics);
 // GET /api/live-events/:id/product-metrics - Obtener métricas por producto destacado (público)
 router.get('/:id/product-metrics', liveEventController.getProductMetrics);
 
+// POST /api/live-events/:id/reminders - Incrementar contador de recordatorios del evento
+router.post('/:id/reminders', verifyToken, liveEventController.addReminder);
+
 // PATCH /api/live-events/:id/metrics - Actualizar métricas del evento (sin auth para permitir tracking)
 router.patch('/:id/metrics', liveEventController.updateMetrics);
 

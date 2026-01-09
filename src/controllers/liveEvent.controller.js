@@ -747,6 +747,36 @@ exports.getPublicLiveEvents = async (req, res) => {
   }
 };
 
+exports.addReminder = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const event = await LiveEvent.findByIdAndUpdate(
+      id,
+      { $inc: { remindersCount: 1 } },
+      { new: true, select: '_id remindersCount status' }
+    );
+
+    if (!event) {
+      return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        remindersCount: event.remindersCount,
+      },
+    });
+  } catch (error) {
+    console.error('Error actualizando recordatorios del evento:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error interno del servidor',
+      error: error.message,
+    });
+  }
+};
+
 exports.getLiveEvent = async (req, res) => {
   try {
     const { id } = req.params;

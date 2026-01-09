@@ -325,7 +325,7 @@ exports.listInfluencers = async (req, res) => {
 
     const users = await User.find({
       userType: { $in: ['influencer'] }
-    }).select('name fullName avatar influencerProfile youtubeTokens');
+    }).select('name fullName avatar influencerProfile youtubeTokens followers');
 
     // Mapeamos la respuesta para mantener la misma forma que el frontend espera
     const influencers = users.map((u) => {
@@ -342,6 +342,7 @@ exports.listInfluencers = async (req, res) => {
         name: u.name,
         fullName: u.fullName,
         avatar: u.avatar,
+        followers: Number(u.followers || 0) || 0,
         youtubeConnected: Boolean(u.youtubeTokens),
         influencerProfile: {
           niche: profile.niche,
@@ -390,7 +391,6 @@ exports.getInfluencerPublicMetrics = async (req, res) => {
 
     const events = await LiveEvent.find({ owner: id })
       .sort({ startDateTime: -1 })
-      .limit(5)
       .select('_id status');
 
     const eventIds = events.map((e) => e._id);
@@ -399,6 +399,7 @@ exports.getInfluencerPublicMetrics = async (req, res) => {
       : [];
 
     let averageViews = 0;
+    let totalViews = 0;
     let engagementRate = 0;
 
     if (metricsDocs.length) {
@@ -406,7 +407,8 @@ exports.getInfluencerPublicMetrics = async (req, res) => {
         .map((m) => Number(m.uniqueViewers || m.avgConcurrentViewers || 0))
         .filter((n) => !isNaN(n) && n > 0);
       if (viewers.length) {
-        averageViews = Math.round(viewers.reduce((a, b) => a + b, 0) / viewers.length);
+        totalViews = viewers.reduce((a, b) => a + b, 0);
+        averageViews = Math.round(totalViews / viewers.length);
       }
 
       const ratios = metricsDocs
@@ -436,8 +438,18 @@ exports.getInfluencerPublicMetrics = async (req, res) => {
     }
 
     const livesEmitted = await LiveEvent.countDocuments({ owner: id, status: 'finished' });
+    const followersCount = Number(user.followers || 0) || 0;
 
-    return res.json({ success: true, data: { averageViews, engagementRate, livesEmitted } });
+    return res.json({
+      success: true,
+      data: {
+        averageViews,
+        totalViews,
+        engagementRate,
+        livesEmitted,
+        followers: followersCount
+      }
+    });
   } catch (err) {
     console.error('Error obteniendo métricas públicas de influencer:', err);
     return res.status(500).json({ success: false, message: 'Error en el servidor', error: err.message });
