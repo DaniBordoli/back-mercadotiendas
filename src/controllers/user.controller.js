@@ -26,8 +26,10 @@ const upload = multer({
 const getProfile = async (req, res) => {
   try {
     // Seleccionamos los campos específicos que queremos devolver
-  const user = await User.findById(req.user.id)
-      .select('name email birthDate city province country userPhone shop avatar userType preferredAddress youtubeTokens sellerProfile influencerProfile followers preferences twoFactorEnabled')
+    const user = await User.findById(req.user.id)
+      .select(
+        'name email birthDate city province country userPhone shop avatar userType preferredAddress youtubeTokens sellerProfile influencerProfile followers preferences twoFactorEnabled followingUsers followingShops'
+      )
       .populate('shop');
     if (!user) {
       return errorResponse(res, 'Usuario no encontrado', 404);
