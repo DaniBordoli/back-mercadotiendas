@@ -1,8 +1,7 @@
 const { validationResult } = require('express-validator');
 const { sendSupportTicketEmail, sendSupportAckEmail } = require('../services/email.service');
 const { errorResponse, successResponse } = require('../utils/responseHelper');
-const os = require('os');
-const path = require('path');
+const SupportTicket = require('../models/SupportTicket');
 
 /**
  * Maneja la creación de un ticket de soporte.
@@ -80,9 +79,97 @@ exports.createSupportTicket = async (req, res) => {
       await sendSupportAckEmail({ to: email, ticketId });
     }
 
+    const userId = req.userId;
+    const ticketPayload = {
+      ticketId,
+      user: userId,
+      email,
+      category,
+      subcategory,
+      priority,
+      description,
+      orderId,
+      storeId,
+      campaignId,
+      metadata,
+      status: 'open',
+      handledBy: null,
+      lastUpdateSource: 'system'
+    };
+
+    await SupportTicket.create(ticketPayload);
+
     return successResponse(res, { ticketId }, 'Ticket de soporte enviado');
   } catch (err) {
     console.error('[SupportTicket] error:', err);
     return errorResponse(res, 'Error al procesar ticket de soporte');
+  }
+};
+
+exports.getMyTicketById = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    if (!ticketId) {
+      return errorResponse(res, 'Falta ticketId', 400);
+    }
+    const ticket = await SupportTicket.findOne({ ticketId, user: req.userId });
+    if (!ticket) {
+      return errorResponse(res, 'Ticket no encontrado', 404);
+    }
+    return successResponse(res, { ticket }, 'Ticket obtenido');
+  } catch (err) {
+    return errorResponse(res, 'Error al obtener ticket de soporte');
+  }
+};
+
+exports.listAdminTickets = async (req, res) => {
+  try {
+    const { status, search, page = 1, limit = 20 } = req.query || {};
+    const filter = {};
+    if (status) {
+      filter.status = status;
+    }
+    if (search) {
+      filter.ticketId = new RegExp(String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    }
+    const pageNum = parseInt(page, 10) || 1;
+    const limitNum = Math.min(parseInt(limit, 10) || 20, 100);
+    const skip = (pageNum - 1) * limitNum;
+
+    const [items, total] = await Promise.all([
+      SupportTicket.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .populate('handledBy', 'name fullName email')
+        .lean(),
+      SupportTicket.countDocuments(filter)
+    ]);
+
+    return successResponse(res, { items, total, page: pageNum, limit: limitNum }, 'Tickets obtenidos');
+  } catch (err) {
+    return errorResponse(res, 'Error al obtener tickets de soporte');
+  }
+};
+
+exports.updateTicketStatusAdmin = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { status } = req.body || {};
+    const allowed = ['open', 'in_review', 'resolved', 'closed'];
+    if (!allowed.includes(status)) {
+      return errorResponse(res, 'Estado inválido', 400);
+    }
+    const ticket = await SupportTicket.findOne({ ticketId });
+    if (!ticket) {
+      return errorResponse(res, 'Ticket no encontrado', 404);
+    }
+    ticket.status = status;
+    ticket.handledBy = req.userId;
+    ticket.lastUpdateSource = 'agent';
+    await ticket.save();
+    return successResponse(res, { ticket }, 'Estado actualizado');
+  } catch (err) {
+    return errorResponse(res, 'Error al actualizar estado del ticket');
   }
 };
