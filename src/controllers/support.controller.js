@@ -2,6 +2,7 @@ const { validationResult } = require('express-validator');
 const { sendSupportTicketEmail, sendSupportAckEmail } = require('../services/email.service');
 const { errorResponse, successResponse } = require('../utils/responseHelper');
 const SupportTicket = require('../models/SupportTicket');
+const cloudinaryService = require('../services/cloudinary.service');
 
 /**
  * Maneja la creación de un ticket de soporte.
@@ -43,8 +44,10 @@ exports.createSupportTicket = async (req, res) => {
       }
     }
 
-    // Archivos adjuntos procesados por multer
-    const attachments = (req.files || []).map((file) => ({
+    const filesArray = Array.isArray(req.files) ? req.files.slice(0, 5) : [];
+
+    // Archivos adjuntos procesados por multer (para email)
+    const attachments = filesArray.map((file) => ({
       filename: file.originalname,
       content: file.buffer,
       contentType: file.mimetype
@@ -80,6 +83,21 @@ exports.createSupportTicket = async (req, res) => {
     }
 
     const userId = req.userId;
+
+    const filesMeta = [];
+    for (const file of filesArray) {
+      try {
+        const url = await cloudinaryService.uploadFile(file.buffer, 'support', file.mimetype);
+        filesMeta.push({
+          originalName: file.originalname,
+          mimeType: file.mimetype,
+          size: file.size,
+          url
+        });
+      } catch (uploadErr) {
+        console.error('[SupportTicket] error al subir adjunto', uploadErr);
+      }
+    }
     const ticketPayload = {
       ticketId,
       user: userId,
@@ -92,6 +110,7 @@ exports.createSupportTicket = async (req, res) => {
       storeId,
       campaignId,
       metadata,
+      files: filesMeta,
       status: 'open',
       handledBy: null,
       lastUpdateSource: 'system'

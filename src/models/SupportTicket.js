@@ -13,6 +13,14 @@ const supportTicketSchema = new mongoose.Schema(
     storeId: { type: String, trim: true },
     campaignId: { type: String, trim: true },
     metadata: { type: Object, default: {} },
+    files: [
+      {
+        originalName: { type: String },
+        mimeType: { type: String },
+        size: { type: Number },
+        url: { type: String }
+      }
+    ],
     status: { type: String, enum: ['open', 'in_review', 'resolved', 'closed'], default: 'open', index: true },
     handledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     lastUpdateSource: { type: String, enum: ['system', 'agent'], default: 'system' }
@@ -21,4 +29,3 @@ const supportTicketSchema = new mongoose.Schema(
 );
 
 module.exports = mongoose.model('SupportTicket', supportTicketSchema);
-
