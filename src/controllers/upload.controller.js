@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { Campaign } = require('../models');
+const cloudinaryService = require('../services/cloudinary.service');
 
 // Directorio para almacenar imágenes
 const UPLOADS_DIR = path.join(__dirname, '../../uploads');
@@ -93,13 +94,21 @@ exports.uploadLiveEventImage = async (req, res) => {
       });
     }
 
-    const fileExtension = path.extname(req.file.originalname);
-    const fileName = `${uuidv4()}${fileExtension}`;
-    const filePath = path.join(LIVE_EVENTS_DIR, fileName);
+    let imageUrl = '';
+    const hasCloudinaryConfig =
+      !!process.env.CLOUDINARY_CLOUD_NAME &&
+      !!process.env.CLOUDINARY_API_KEY &&
+      !!process.env.CLOUDINARY_API_SECRET;
 
-    fs.writeFileSync(filePath, req.file.buffer);
-
-    const imageUrl = `/uploads/live-events/${fileName}`;
+    if (hasCloudinaryConfig) {
+      imageUrl = await cloudinaryService.uploadImage(req.file.buffer, 'live-events');
+    } else {
+      const fileExtension = path.extname(req.file.originalname);
+      const fileName = `${uuidv4()}${fileExtension}`;
+      const filePath = path.join(LIVE_EVENTS_DIR, fileName);
+      fs.writeFileSync(filePath, req.file.buffer);
+      imageUrl = `/uploads/live-events/${fileName}`;
+    }
 
     res.status(200).json({
       success: true,
