@@ -779,8 +779,10 @@ exports.getPublicFinishedLiveEvents = async (req, res) => {
 
     const baseFilter = {
       status: 'finished',
-      platform: 'mux',
-      muxAssetId: { $ne: null },
+      $or: [
+        { muxReplayPlaybackId: { $ne: null } },
+        { muxPlaybackId: { $ne: null } },
+      ],
     };
 
     const filter = { ...baseFilter };
