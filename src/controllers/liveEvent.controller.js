@@ -218,13 +218,21 @@ exports.handleMuxWebhook = async (req, res) => {
     const type = String(evt.type || '').toLowerCase();
     const data = evt.data || {};
 
-    let liveStreamId = data.id || data.live_stream_id || data.source_live_stream_id || null;
+    const isAssetEvent = type.includes('asset.');
+    const liveStreamId = isAssetEvent
+      ? (data.live_stream_id || data.source_live_stream_id || null)
+      : (data.id || data.live_stream_id || data.source_live_stream_id || null);
+    const assetId = isAssetEvent ? (data.id || null) : (data.asset_id || null);
     let event = null;
     if (liveStreamId) {
-      event = await LiveEvent.findOne({ muxLiveStreamId: liveStreamId }).select('_id status muxAssetId muxPlaybackId');
+      event = await LiveEvent
+        .findOne({ muxLiveStreamId: String(liveStreamId) })
+        .select('_id status muxAssetId muxPlaybackId muxReplayPlaybackId');
     }
-    if (!event && data.asset_id) {
-      event = await LiveEvent.findOne({ muxAssetId: data.asset_id }).select('_id status muxAssetId muxPlaybackId');
+    if (!event && assetId) {
+      event = await LiveEvent
+        .findOne({ muxAssetId: String(assetId) })
+        .select('_id status muxAssetId muxPlaybackId muxReplayPlaybackId');
     }
 
     if (event) {
@@ -232,8 +240,8 @@ exports.handleMuxWebhook = async (req, res) => {
       if (type.includes('live_stream.connected') || type.includes('live_stream.active')) newStatus = 'live';
       else if (type.includes('live_stream.disconnected') || type.includes('live_stream.idle') || type.includes('asset.ready')) newStatus = 'finished';
       const isAssetReady = type.includes('asset.ready');
-      if (isAssetReady && data.id && !event.muxAssetId) {
-        event.muxAssetId = String(data.id);
+      if (isAssetReady && (data.id || assetId) && !event.muxAssetId) {
+        event.muxAssetId = String(data.id || assetId);
       }
       if (isAssetReady && Array.isArray(data.playback_ids) && data.playback_ids.length && !event.muxReplayPlaybackId) {
         const playbackId = data.playback_ids[0]?.id || data.playback_ids[0];
@@ -929,13 +937,9 @@ exports.getLiveEventReplay = async (req, res) => {
       return res.status(400).json({ success: false, message: 'El evento no utiliza Mux como plataforma principal' });
     }
 
-    if (!event.muxAssetId) {
-      return res.status(400).json({ success: false, message: 'La grabación de Mux aún no está disponible' });
-    }
-
     const playbackId = event.muxReplayPlaybackId || event.muxPlaybackId;
     if (!playbackId) {
-      return res.status(400).json({ success: false, message: 'No hay playbackId disponible para este evento' });
+      return res.status(400).json({ success: false, message: 'La grabación de Mux aún no está disponible' });
     }
 
     return res.json({
