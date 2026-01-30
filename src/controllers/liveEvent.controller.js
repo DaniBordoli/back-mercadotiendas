@@ -115,7 +115,10 @@ exports.setupMuxLive = async (req, res) => {
     if (!hasCreds) {
       return res.status(500).json({ success: false, message: 'Faltan variables de entorno en el servidor' });
     }
-    const created = await createLiveStream({ test: String(process.env.MUX_TEST_MODE || '').toLowerCase() === 'true' });
+    const created = await createLiveStream({
+      test: String(process.env.MUX_TEST_MODE || '').toLowerCase() === 'true',
+      passthrough: event._id ? String(event._id) : undefined,
+    });
     event.platform = event.platform || 'mux';
     event.muxLiveStreamId = created.id || null;
     event.muxPlaybackId = created.playbackId || null;
@@ -234,12 +237,39 @@ exports.handleMuxWebhook = async (req, res) => {
         .findOne({ muxAssetId: String(assetId) })
         .select('_id status muxAssetId muxPlaybackId muxReplayPlaybackId');
     }
+    if (!event && data.passthrough) {
+      let passthroughId = null;
+      if (typeof data.passthrough === 'string') {
+        const trimmed = data.passthrough.trim();
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            passthroughId = typeof parsed === 'string' ? parsed : (parsed?.eventId || parsed?.id || null);
+          } catch {
+            passthroughId = trimmed;
+          }
+        } else {
+          passthroughId = trimmed;
+        }
+      } else if (typeof data.passthrough === 'object' && data.passthrough) {
+        passthroughId = data.passthrough.eventId || data.passthrough.id || null;
+      }
+
+      if (passthroughId && mongoose.Types.ObjectId.isValid(String(passthroughId))) {
+        event = await LiveEvent
+          .findById(String(passthroughId))
+          .select('_id status muxAssetId muxPlaybackId muxReplayPlaybackId');
+      }
+    }
 
     if (event) {
       let newStatus = null;
       if (type.includes('live_stream.connected') || type.includes('live_stream.active')) newStatus = 'live';
       else if (type.includes('live_stream.disconnected') || type.includes('live_stream.idle') || type.includes('asset.ready')) newStatus = 'finished';
       const isAssetReady = type.includes('asset.ready');
+      if (liveStreamId && !event.muxLiveStreamId) {
+        event.muxLiveStreamId = String(liveStreamId);
+      }
       if (isAssetReady && (data.id || assetId) && !event.muxAssetId) {
         event.muxAssetId = String(data.id || assetId);
       }

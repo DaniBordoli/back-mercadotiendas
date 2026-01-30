@@ -15,6 +15,7 @@ async function createLiveStream(opts = {}) {
     new_asset_settings: { playback_policy: ['public'] },
     latency_mode: opts.latency_mode || 'low',
     reconnect_window: opts.reconnect_window || 60,
+    ...(opts.passthrough ? { passthrough: String(opts.passthrough) } : {}),
     ...(opts.test === true ? { test: true } : {}),
   };
   try {
